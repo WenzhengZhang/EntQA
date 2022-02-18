@@ -3,13 +3,10 @@ import json
 from torch.utils.data import DataLoader, Dataset
 import os
 import numpy as np
-import random
 import faiss
 from utils import OrderedSet, sample_range_excluding
 from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
-from tqdm import tqdm
-import sys
 
 
 # for embedding entities during inference
@@ -318,22 +315,50 @@ def save_candidates(mentions, candidates, entity_map, labels, out_dir, part):
     fout = open(out_path, 'w')
     for i in range(len(mentions)):
         mention = mentions[i]
-        candidate = candidates[i]
+        m_candidates = candidates[i]
+        m_spans = [[s[0], s[1] - 1] for s in mention['spans']]
+        assert len(mention['entities']) == len(mention['spans'])
+        ent_span_dict = {k: [] for k in mention['entities']}
+        for j, l in enumerate(mention['entities']):
+            ent_span_dict[l].append(m_spans[j])
         if part == 'train':
-            positives = [c for c in candidate if c in labels[i]]
-            negatives = [c for c in candidate if c not in labels[i]]
-            positive_titles = entity_titles[positives].tolist()
-            negative_titles = entity_titles[negatives].tolist()
+            positives = [c for c in m_candidates if c in labels[i].tolist()]
+            negatives = [c for c in m_candidates if c not in labels[i].tolist()]
+            pos_titles = entity_titles[positives].tolist()
+            pos_spans = [ent_span_dict[p] for p in pos_titles]
+            neg_spans = [[[0, 0]]] * len(negatives)
             item = {'doc_id': mention['doc_id'],
                     'mention_idx': i,
-                    'positives': positive_titles,
-                    'negatives': negative_titles}
+                    'mention_ids': mention['text'],
+                    'positives': positives,
+                    'negatives': negatives,
+                    'labels': mention['entities'],
+                    'label_spans': m_spans,
+                    'pos_spans': pos_spans,
+                    'neg_spans': neg_spans,
+                    'offset': mention['offset'],
+                    'title': mention['title'],
+                    'topic': mention['topic'],
+                    'passage_labels': [1] * len(positives) + [0] * len(
+                        negatives)
+                    }
         else:
+            candidate_titles = entity_titles[m_candidates]
+            candidate_spans = [ent_span_dict[s] if s in ent_span_dict else
+                               [[0, 0]] for s in candidate_titles]
+            passage_labels = [1 if c in mention['entities'] else 0 for c in
+                              candidate_titles]
             item = {'doc_id': mention['doc_id'],
                     'mention_idx': i,
-                    'candidates': entity_titles[candidate].tolist()}
+                    'candidates': m_candidates,
+                    'title': mention['title'],
+                    'topic': mention['topic'],
+                    'mention_ids': mention['text'],
+                    'labels': mention['entities'],
+                    'label_spans': m_spans,
+                    'offset': mention['offset'],
+                    'candidate_spans': candidate_spans,
+                    'passage_labels': passage_labels
+                    }
         fout.write('%s\n' % json.dumps(item))
     fout.close()
-
-
-
