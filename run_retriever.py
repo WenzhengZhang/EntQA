@@ -10,13 +10,17 @@ from transformers import BertTokenizer, BertModel, AdamW, \
 from datetime import datetime
 import json
 from collections import OrderedDict
-from util_dists import check_distributed, strtime
+from util_dists import check_distributed, scale_grad
 import torch.distributed as dist
-from utils import Logger
+from utils import Logger, strtime
 from sklearn.metrics import label_ranking_average_precision_score
 from data_retriever import load_data, get_loaders, \
     get_embeddings, get_hard_negative, save_candidates, get_labels, \
     get_entity_map, get_loader_from_candidates
+
+
+# TODO: check len(data_loader) for distributed sampler in order to verify
+#  optimizer is correct
 
 
 def set_seeds(args):
@@ -263,7 +267,8 @@ def main(args):
             logger.log('no need to mine hard negatives')
             candidates = None
         else:
-            mention_embeds = get_embeddings(train_men_loader, model, True)
+            mention_embeds = get_embeddings(train_men_loader, model, True,
+                                            device, is_distributed, world_size)
             logger.log('mining hard negatives')
             mining_start_time = datetime.now()
             candidates = get_hard_negative(mention_embeds, all_cands_embeds,
@@ -283,6 +288,9 @@ def main(args):
                                                   args.use_title, True, args.B,
                                                   is_distributed, world_size,
                                                   rank, args.seed)
+        logger.log('len train loader {:d} vs '
+                   'num batches{:d}'.format(len(train_loader),
+                                            len(samples_train) // args.B))
         if local_rank == 0:
             dist.barrier()
         epoch_train_start_time = datetime.now()
@@ -299,9 +307,10 @@ def main(args):
             else:
                 loss_avg.backward()
             tr_loss += loss_avg.item()
-            # print('loss is %f' % loss.item())
 
             if (step + 1) % args.gradient_accumulation_steps == 0:
+                # if is_distributed:
+                #     scale_grad(model, world_size)
                 if args.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer),
                                                    args.clip)
@@ -438,10 +447,6 @@ def main(args):
                         train_labels,
                         args.out_dir,
                         'train')
-
-
-#    test_train_result = evaluate(train_loader, model,args)
-#   logger.log('test train acc {:f}'.format(test_train_result))
 
 
 if __name__ == '__main__':
