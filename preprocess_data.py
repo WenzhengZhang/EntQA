@@ -5,7 +5,10 @@ import random
 import csv
 from transformers import BertTokenizer
 import os
+from copy import deepcopy
 
+
+# TODO: remap entities
 
 def compute_length(text_list, word_length):
     length = 0
@@ -86,6 +89,33 @@ def process_raw_aida(raw_dir, part):
         if new_doc["text"]:
             full_data.append(new_doc)
     return full_data
+
+
+def load_processed_aida(args, part):
+    path = os.path.join(args.out_processed_dir, 'aida_%s.json' % part)
+    with open(path) as f:
+        res = json.load(f)
+    return res
+
+
+def normalize_string(s):
+    s = s.replace('_', ' ')
+    return eval(repr(s).replace('\\\\', '\\'))
+
+
+def process_entities(processed_raw_data, args):
+    title_map_path = os.path.join(args.title_map_dir, 'title_map.json')
+    with open(title_map_path) as f:
+        title_map = json.load(f)
+    res = []
+    for d in processed_raw_data:
+        r = deepcopy(d)
+        ents = [title_map[normalize_string(e)] if normalize_string(e) in
+                                                  title_map else normalize_string(
+            e) for e in d['entities']]
+        r['entities'] = ents
+        res.append(r)
+    return res
 
 
 def tokenize_original_text(processed_raw_data, tokenizer, part, args):
@@ -254,11 +284,27 @@ def save_aida(data, args, part):
         json.dump(data, f)
 
 
+def save_aida_processed(data, args, part):
+    out_path = os.path.join(args.out_processed_dir, 'aida_%s.json' % part)
+    with open(out_path, 'w') as f:
+        json.dump(data, f)
+
+
 def main(args):
     # process raw aida
     aida_train = process_raw_aida(args.raw_dir, 'train')
     aida_val = process_raw_aida(args.raw_dir, 'val')
     aida_test = process_raw_aida(args.raw_dir, 'test')
+    aida_train = process_entities(aida_train, args)
+    aida_val = process_entities(aida_val, args)
+    aida_test = process_entities(aida_test, args)
+    if args.save_processed:
+        save_aida_processed(aida_train, args, 'train')
+        save_aida_processed(aida_val, args, 'val')
+        save_aida_processed(aida_test, args, 'test')
+    # aida_train = load_processed_aida(args, 'train')
+    # aida_val = load_processed_aida(args, 'val')
+    # aida_test = load_processed_aida(args, 'test')
     # tokenize aida
     print('tokenize aida...')
     tokenizer = BertTokenizer.from_pretrained("bert-large-uncased")
@@ -282,8 +328,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--raw_dir', type=str,
                         help='raw aida data directory')
+    parser.add_argument('--title_map_dir', type=str,
+                        help='title map  directory')
+    parser.add_argument('--save_processed', action='store_true',
+                        help='save processed raw aida data?')
     parser.add_argument('--out_aida_dir', type=str,
                         help='output aida data directory')
+    parser.add_argument('--out_processed_dir', type=str,
+                        help='output processed raw aida data directory')
     parser.add_argument('--raw_kb_path', type=str,
                         help='raw kilt kb path')
     parser.add_argument('--out_kb_path', type=str,
