@@ -52,6 +52,8 @@ class Reader(nn.Module):
         # B x C x max_passage_len x max_passage_len
         mention_probs = mention_probs.exp().triu(0).tril(self.max_answer_len
                                                          - 1)
+        if self.do_rerank:
+            return mention_probs, rank_logits
         return mention_probs
 
     def forward(self, input_ids,
@@ -125,19 +127,20 @@ def get_top_spans(_mention_probs,
     return selected_spans
 
 
-def get_batch_predicts(mention_probs,
-                       k=10,
-                       filter_span=True,
-                       no_multi_ents=False):
+def get_predicts(mention_probs,
+                 k=10,
+                 filter_span=True,
+                 no_multi_ents=False):
     """
-    :param mention_probs:  B x C x max_passage_len x max_passage_len
+    :param mention_probs:  N x C x max_passage_len x max_passage_len
     :param k: top k spans for each candidate
     :param filter_span: prevent nested mention spans?
     :param no_multi_ents:  prevent multiple entities for a single mention span?
     :return: batch predictions before thresholding
     """
     B, C, max_passage_len, _ = mention_probs.size()
-    batch_results = []
+    print(mention_probs.size())
+    results = []
     for i in range(B):
         candidate_predicts = []
         for j in range(C):
@@ -149,12 +152,10 @@ def get_batch_predicts(mention_probs,
                 candidate_idx = torch.tensor([[j]] * num_spans)
                 # kx4: entity,start,end,score
                 result = torch.cat((candidate_idx, spans), 1)
-                # d=6 : scores,entity_score,entity,start,end,span_score
                 assert result.size() == (num_spans, 4)
                 candidate_predicts.append(result)
         if len(candidate_predicts) > 0:
             candidate_predicts = torch.cat(candidate_predicts, 0)  # Ck x 4
-            batch_results.append(candidate_predicts)
             #  prevent multiple entities for the same mention span
             if no_multi_ents:
                 candidate_predicts = candidate_predicts[
@@ -165,22 +166,22 @@ def get_batch_predicts(mention_probs,
                 candidate_predicts = torch.tensor(candidate_predicts[
                                                       unique_ids])
             # entity, start, end,score
-            batch_results.append(candidate_predicts)
+            results.append(candidate_predicts)
         else:
-            batch_results.append([])
+            results.append([])
 
-    return batch_results
+    return results
 
 
-def prune_batch_predicts(batch_predicts, threshold):
-    assert len(batch_predicts) > 0
-    batch_results = []
-    for cand_predicts in batch_predicts:
+def prune_predicts(predicts, threshold):
+    assert len(predicts) > 0
+    results = []
+    for cand_predicts in predicts:
         if len(cand_predicts) == 0:
-            batch_results.append([])
+            results.append([])
         else:
             cand_probs = cand_predicts[:, -1]
             selection = (cand_probs > threshold)
             cand_results = cand_predicts[:, :-1].long()[selection].tolist()
-            batch_results.append(cand_results)
-    return batch_results
+            results.append(cand_results)
+    return results

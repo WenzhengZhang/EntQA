@@ -36,7 +36,7 @@ def get_raw_results(model, device, loader, k, samples,
             batch = tuple(t.to(device) for t in batch)
             bid = batch[-1]
             if do_rerank:
-                batch_p, rank_logits_b = model(*batch[:-1]).detach()
+                batch_p, rank_logits_b = model(*batch[:-1])
             else:
                 batch_p = model(*batch[:-1]).detach()
             # TODO: write a function for this part
@@ -64,8 +64,12 @@ def get_raw_results(model, device, loader, k, samples,
         if is_distributed:
             bids = np.concatenate(bids, 0)
             ps = ps[np.unique(bids, return_index=True)[1]]
+    print(ps.size(0))
     raw_predicts = get_predicts(ps, k, filter_span, no_multi_ents)
-    assert len(raw_predicts) == len(samples)
+    try:
+        assert len(raw_predicts) == len(samples)
+    except AssertionError:
+        print((len(raw_predicts), len(samples)))
     if do_rerank:
         ranking_scores = torch.cat(ranking_scores, 0)
         ranking_labels = torch.cat(ranking_labels, 0)
@@ -125,7 +129,17 @@ def load_model(is_init, model_path, type_encoder, device, type_span_loss,
             torch.load(model_path, map_location=torch.device('cpu'))
         model = Reader(encoder, type_span_loss, do_rerank, type_rank_loss,
                        max_answer_len)
-        model.load_state_dict(package['sd'])
+        try:
+            model.load_state_dict(package['sd'])
+        except RuntimeError:
+            # forgot to save model.module.sate_dict
+            from collections import OrderedDict
+            state_dict = package['sd']
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = k[7:]  # remove `module.`
+                new_state_dict[name] = v
+            model.load_state_dict(new_state_dict)
         return model
 
 
@@ -173,8 +187,8 @@ def main(args):
     is_main_process = local_rank in [-1, 0]
     is_distributed = local_rank != -1
     # check distributed values
-    assert is_distributed == dist.is_initialized()
-    assert world_size == dist.get_world_size()
+    # assert is_distributed == dist.is_initialized()
+    # assert world_size == dist.get_world_size()
 
     logger = Logger(args.model + '.log', on=is_main_process)
     logger.log(str(args))
@@ -383,8 +397,8 @@ def main(args):
 
     logger.log('test inference time {:s}'.format(strtime(
         start_time_test_infer)))
-    logger.log('per val instance inference time {:s}'.format(strtime(
-        start_time_test_infer) / len(data[2])))
+    logger.log('per val instance inference time {:s}'.format(str((
+        (datetime.now()-start_time_test_infer) / len(data[2])))))
     if is_main_process:
         logger.log('save test results')
         test_save_path = os.path.join(args.results_dir, 'test_raw')
@@ -420,8 +434,8 @@ def main(args):
         args.no_multi_ents)
     logger.log('val inference time {:s}'.format(strtime(
         start_time_val_infer)))
-    logger.log('per val instance inference time {:s}'.format(strtime(
-        start_time_val_infer) / len(data[1])))
+    logger.log('per val instance inference time {:s}'.format(str((
+            (datetime.now() - start_time_val_infer) / len(data[1])))))
     if is_main_process:
         logger.log('save val results')
         val_save_path = os.path.join(args.results_dir, 'val_raw')
@@ -461,12 +475,14 @@ if __name__ == '__main__':
                         help=' results directory')
     parser.add_argument('--L', type=int, default=160,
                         help='max length of joint input [%(default)d]')
-    parser.add_argument('--max_q_len', type=int, default=32,
-                        help='max length of question [%(default)d]')
+    parser.add_argument('--max_passage_len', type=int, default=32,
+                        help='max length of passage [%(default)d]')
     # parser.add_argument('--max_len_doc', type=int, default=3430,
     #                     help='max length of document [%(default)d]')
     parser.add_argument('--filter_span', action='store_true',
                         help='filter span?')
+    parser.add_argument('--resume_training', action='store_true',
+                        help='resume training?')
     parser.add_argument('--no_multi_ents', action='store_true',
                         help='prevent multiple entities for a mention span?')
     parser.add_argument('--add_topic', action='store_true',
@@ -480,7 +496,7 @@ if __name__ == '__main__':
     parser.add_argument('--k', type=int, default=10,
                         help='get top-k spans per entity before top-p '
                              'filtering')
-    parser.add_argument('--thresd_p', type=float, default=0.05,
+    parser.add_argument('--thresd', type=float, default=0.05,
                         help='probabilty threshold for top-p filtering')
     parser.add_argument('--num_answers', type=int, default=10,
                         help='max number of answers [%(default)d]')
@@ -535,19 +551,19 @@ if __name__ == '__main__':
     parser.add_argument('--simpleoptim', action='store_true',
                         help='simple optimizer (constant schedule, '
                              'no weight decay?')
-    parser.add_argument('--no_multi_ents', action='store_true',
-                        help='no repeated entities are allowed given a span?')
     parser.add_argument('--type_encoder', type=str,
                         default='bert_base',
                         help='the type of encoder')
     parser.add_argument('--type_span_loss', type=str,
-                        default='lml',
-                        choices=['lml', 'mll', 'max_min', 'mll_norm'],
-                        help='the type of marginalization')
+                        default='sum_log',
+                        choices=['log_sum', 'sum_log', 'sum_log_nce',
+                                 'max_min'],
+                        help='type of multi-label loss for span ?')
     parser.add_argument('--type_rank_loss', type=str,
-                        default='lml',
-                        choices=['lml', 'mll', 'max_min', 'mll_norm'],
-                        help='the type of marginalization')
+                        default='sum_log',
+                        choices=['log_sum', 'sum_log', 'sum_log_nce',
+                                 'max_min'],
+                        help='type of multi-label loss  for rerank?')
     parser.add_argument(
         "--fp16",
         action="store_true",

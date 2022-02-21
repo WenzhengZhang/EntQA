@@ -68,11 +68,7 @@ class ReaderData(Dataset):
             spans = sample['candidate_spans'][:self.max_num_candidates]
         candidates_ids = self.all_entity_token_ids[candidates]
         candidates_masks = self.all_entity_masks[candidates]
-        passage_labels = torch.tensor(passage_labels).long()
-        start_labels = torch.zeros((self.max_num_candidates,
-                                    self.max_len)).long()
-        end_labels = torch.zeros((self.max_num_candidates,
-                                  self.max_len)).long()
+
         encoded_pairs = torch.zeros((self.max_num_candidates,
                                      self.max_len)).long()
         type_marks = torch.zeros((self.max_num_candidates, self.max_len)).long()
@@ -80,11 +76,18 @@ class ReaderData(Dataset):
                                        self.max_len)).long()
         answer_masks = torch.zeros((self.max_num_candidates,
                                     self.max_passage_len)).long()
+        passage_labels = torch.tensor(passage_labels).long()
+        if self.is_training:
+            start_labels = torch.zeros((self.max_num_candidates,
+                                        self.max_len)).long()
+            end_labels = torch.zeros((self.max_num_candidates,
+                                      self.max_len)).long()
         for i, candidate_ids in enumerate(candidates_ids):
-            _spans = np.array(spans[i])
-            # print(_spans)
-            start_labels[i, _spans[:, 0]] = 1
-            end_labels[i, _spans[:, 1]] = 1
+            if self.is_training:
+                _spans = np.array(spans[i])
+                # print(_spans)
+                start_labels[i, _spans[:, 0]] = 1
+                end_labels[i, _spans[:, 1]] = 1
             candidate_ids = candidate_ids.tolist()
             candidate_masks = candidates_masks[i].tolist()
             # CLS mention ids TT title ids SEP candidate ids SEP
@@ -105,15 +108,21 @@ class ReaderData(Dataset):
             type_marks[i] = torch.tensor(token_type_ids)
             # exclude SEP position for mention ids
             answer_masks[i, :len(mention_ids) - 1] = 1
-        return encoded_pairs, attention_masks, type_marks, answer_masks, \
-               passage_labels, start_labels, end_labels
+        if self.is_training:
+            return encoded_pairs, attention_masks, type_marks, answer_masks, \
+                   passage_labels, start_labels, end_labels
+        else:
+            return encoded_pairs, attention_masks, type_marks, answer_masks, \
+                   passage_labels, torch.tensor([index]).long()
 
 
 def load_data(data_dir, kb_dir):
     def read_data(part):
         name = '%s.json' % part
+        items = []
         with open(os.path.join(data_dir, name)) as f:
-            items = json.load(f)
+            for line in f:
+                items.append(json.loads(line))
         return items
 
     samples_train = read_data('train')
