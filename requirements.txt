@@ -1,0 +1,5 @@
+scikit-learn
+numpy
+spacy
+torch=1.10.2
+transformers>=4.0
