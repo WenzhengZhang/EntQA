@@ -4,6 +4,14 @@ This repo provides the code for our ICLR 2022 paper [EntQA: Entitly Linking as Q
 
 ## Setup
 
+```
+conda create --name entqa python=3.8
+conda activate entqa
+pip -r install requirements.txt
+conda install -c pytorch faiss-gpu cudatoolkit=11.0
+
+```
+
 ## Download data & preprocess
 
 ## Train Retriever 
