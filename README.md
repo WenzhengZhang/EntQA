@@ -14,7 +14,7 @@ conda install -c pytorch faiss-gpu cudatoolkit=11.0
 
 ## Download data & preprocess
 1.Download KILT wikipedia knowledge base [here](https://github.com/facebookresearch/KILT) and put it under a kb directory like /raw_kb/  \
-2. Download BLINK pretrained retriever model [here](https://github.com/facebookresearch/BLINK)
+2. Download BLINK pretrained retriever model [here](https://github.com/facebookresearch/BLINK)  \
 3. Download AIDA CoNLL datasets [here](https://www.mpi-inf.mpg.de/departments/databases-and-information-systems/research/ambiverse-nlu/aida/downloads) and place them under a raw aida directory like /raw_aida/ \
 4. Download entity title map dictionary [here](https://drive.google.com/file/d/1QE3N8S_tVkGhYz_5fjRahLHfkIwghi-4/view?usp=sharing) and put it under /raw_aida/ for remapping outdated entities of AIDA datasets to KILT wikipedia entity titles \
 5. preprocess AIDA data and KILT kb by
