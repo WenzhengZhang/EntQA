@@ -4,7 +4,7 @@ import torch
 
 class MultiLabelLoss(nn.Module):
 
-    def __init__(self, type_loss):
+    def __init__(self, type_loss, reduction='sum'):
         # type loss : log_sum(marginal),
         # sum_log (include all golds in normalization term),
         # sum_log_nce (include only one gold in normalization term each time)
@@ -14,21 +14,22 @@ class MultiLabelLoss(nn.Module):
                                   'sum_log',
                                   'sum_log_nce',
                                   'max_min']
+        self.reduction = reduction
 
     def forward(self, logits, label_marks):
         if self.type_loss == 'log_sum':
-            return log_sum_loss(logits, label_marks)
+            return log_sum_loss(logits, label_marks, self.reduction)
         elif self.type_loss == 'sum_log':
-            return sum_log_loss(logits, label_marks)
+            return sum_log_loss(logits, label_marks,self.reduction)
         elif self.type_loss == 'sum_log_nce':
-            return sum_log_nce_loss(logits, label_marks)
+            return sum_log_nce_loss(logits, label_marks,self.reduction)
         elif self.type_loss == 'max_min':
-            return max_min_loss(logits, label_marks)
+            return max_min_loss(logits, label_marks,self.reduction)
         else:
             raise ValueError('wrong type of multi-label loss')
 
 
-def log_sum_loss(logits, mask):
+def log_sum_loss(logits, mask, reduction='sum'):
     """
     :param logits: reranking logits(B x C) or span loss(B x C x L)
     :param mask: reranking mask(B x C) or span mask(B x C x L)
@@ -40,10 +41,12 @@ def log_sum_loss(logits, mask):
     all_log_sum_exp = torch.logsumexp(logits, -1)
     gold_log_probs = gold_log_sum_exp - all_log_sum_exp
     loss = -gold_log_probs.sum()
+    if reduction == 'mean':
+        loss /= logits.size(0)
     return loss
 
 
-def sum_log_nce_loss(logits, mask):
+def sum_log_nce_loss(logits, mask, reduction='sum'):
     """
         :param logits: reranking logits(B x C) or span loss(B x C x L)
         :param mask: reranking mask(B x C) or span mask(B x C x L)
@@ -57,10 +60,12 @@ def sum_log_nce_loss(logits, mask):
         mask.bool()), 0).sum(-1)
     gold_log_probs = gold_scores_sum - norm_term
     loss = -gold_log_probs.sum()
+    if reduction == 'mean':
+        loss /= logits.size(0)
     return loss
 
 
-def sum_log_loss(logits, mask):
+def sum_log_loss(logits, mask, reduction='sum'):
     """
             :param logits: reranking logits(B x C) or span loss(B x C x L)
             :param mask: reranking mask(B x C) or span mask(B x C x L)
@@ -72,10 +77,12 @@ def sum_log_loss(logits, mask):
     all_log_sum_exp = torch.logsumexp(logits, -1)  # B x C
     gold_log_probs = gold_scores_sum - all_log_sum_exp * num_pos
     loss = -gold_log_probs.sum()
+    if reduction == 'mean':
+        loss /= logits.size(0)
     return loss
 
 
-def max_min_loss(logits, mask):
+def max_min_loss(logits, mask, reduction='sum'):
     """
             :param logits: reranking logits(B x C) or span loss(B x C x L)
             :param mask: reranking mask(B x C) or span mask(B x C x L)
@@ -86,4 +93,6 @@ def max_min_loss(logits, mask):
     all_log_sum_exp = torch.logsumexp(logits, -1)
     min_gold_probs = min_gold_scores - all_log_sum_exp
     loss = -min_gold_probs.sum()
+    if reduction == 'mean':
+        loss /= logits.size(0)
     return loss

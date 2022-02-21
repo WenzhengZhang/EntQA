@@ -137,8 +137,6 @@ def main(args):
     is_main_process = local_rank in [-1, 0]
     is_distributed = local_rank != -1
     # check distributed values
-    assert is_distributed == dist.is_initialized()
-    assert world_size == dist.get_world_size()
 
     logger = Logger(args.model + '.log', on=is_main_process)
     logger.log(str(args))
@@ -251,6 +249,7 @@ def main(args):
         start_epoch = cpt['epoch'] + 1
     model.zero_grad()
     all_cands_embeds = None
+    logger.log('get candidates embeddings')
     if args.resume_training:
         # we store candidates embeddings after each epoch
         all_cands_embeds = np.load(args.cands_embeds_path)
@@ -261,16 +260,19 @@ def main(args):
     for epoch in range(start_epoch, args.epochs + 1):
         logger.log('\nEpoch {:d}'.format(epoch))
         epoch_start_time = datetime.now()
-        if not is_main_process:
-            dist.barrier()
+
         if args.rands_ratio == 1.0:
             logger.log('no need to mine hard negatives')
             candidates = None
+            # if not is_main_process:
+            #     dist.barrier()
         else:
             mention_embeds = get_embeddings(train_men_loader, model, True,
                                             device, is_distributed, world_size)
             logger.log('mining hard negatives')
             mining_start_time = datetime.now()
+            # if not is_main_process:
+            #     dist.barrier()
             candidates = get_hard_negative(mention_embeds, all_cands_embeds,
                                            args.num_cands,
                                            max_num_positives,
@@ -290,16 +292,21 @@ def main(args):
                                                   rank, args.seed)
         logger.log('len train loader {:d} vs '
                    'num batches{:d}'.format(len(train_loader),
-                                            len(samples_train) // args.B))
-        if local_rank == 0:
-            dist.barrier()
+                                            len(samples_train) // (
+                                             args.B*world_size)))
+        # if local_rank == 0:
+        #     dist.barrier()
         epoch_train_start_time = datetime.now()
         for step, batch in enumerate(train_loader):
             model.train()
+            # if is_main_process:
+            bsz = batch[0].size(0)
             batch = tuple(t.to(device) for t in batch)
             loss = model(*batch)[0]
             if dp:
-                loss = loss.mean()
+                loss = loss.sum()/bsz
+            else:
+                loss /= bsz
             loss_avg = loss / args.gradient_accumulation_steps
             if args.fp16:
                 with amp.scale_loss(loss_avg, optimizer) as scaled_loss:
@@ -378,7 +385,7 @@ def main(args):
     model = load_model(False, config['biencoder_config'], args.model, device,
                        args.type_loss,
                        args.blink)
-    all_cands_embeds = np.load(args.cands_embeds_path)
+    # all_cands_embeds = np.load(args.cands_embeds_path)
     if local_rank == 0:
         dist.barrier()
     model.to(device)
@@ -426,7 +433,8 @@ def main(args):
     logger.log('val inference time {:s} |'
                'val infer time per instance {:s}'
                ''.format(strtime(start_time_val_infer),
-                         strtime(start_time_val_infer) / len(samples_val)))
+                         str((datetime.now()-start_time_val_infer) / len(
+                             samples_val))))
     # del val_mention_embeds
     logger.log('saving val pairs')
     if not is_main_process:
@@ -458,8 +466,9 @@ if __name__ == '__main__':
     parser.add_argument('--resume_training', action='store_true',
                         help='resume training from checkpoint?')
     parser.add_argument('--type_loss', type=str,
-                        choices=['mll', 'lml', 'rebuild_sample', 'mll_unorm'],
-                        help='use marginal log likelihood ?')
+                        choices=['log_sum', 'sum_log', 'sum_log_nce',
+                                 'max_min'],
+                        help='type of multi-label loss ?')
     parser.add_argument('--use_title', action='store_true',
                         help='use title or topic?')
     parser.add_argument('--add_topic', action='store_true',
