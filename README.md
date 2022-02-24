@@ -52,6 +52,8 @@ python run_retriever.py \
 **hard Recall@k** is the percentage of the number of passages with all the gold entities retrieved in the topk candidates with respect to the number of passages. \
 **LRAP** is [Label ranking average precision ](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.label_ranking_average_precision_score.html) which measures the multi-label ranking performance.
 
+
+
 ## Train Reader 
 
 Train reader by
