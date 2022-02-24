@@ -80,7 +80,7 @@ python run_reader.py  \
 |   87.73%  |   84.74%  |   90.29%    |    86.73%    |     85.31%      |      84.74%      |
 
 ## GERBIL evaluation
-Our GERBIL evaluation follows [here](https://github.com/dalab/end2end_neural_el)
+Our GERBIL evaluation steps follow [here](https://github.com/dalab/end2end_neural_el), specifically:
 1. Download our snapshot of GERBIL repo [here](), our pretrained retriever [here]() and our pretrained reader [here]()
 2. One one terminal/screen run GERBIL by:
 ```
