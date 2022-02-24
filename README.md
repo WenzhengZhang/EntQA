@@ -80,3 +80,29 @@ python run_reader.py  \
 |   87.73%  |   84.74%  |   90.29%    |    86.73%    |     85.31%      |      84.74%      |
 
 ## GERBIL evaluation
+Our GERBIL evaluation follows [here](https://github.com/dalab/end2end_neural_el)
+1. Download our snapshot of GERBIL repo [here](), our pretrained retriever [here]() and our pretrained reader [here]()
+2. One one terminal/screen run GERBIL by:
+```
+cd gerbil
+./start.sh
+
+```
+3. On another terminal/screen run:
+```
+cd gerbil-SpotWrapNifWS4Test/
+mvn clean -Dmaven.tomcat.port=1235 tomcat:run
+
+```
+4. On a third terminal/screen run:
+```
+
+
+```
+Open the url http://localhost:1234/gerbil
+- Configure experiment
+- In URI field write: http://localhost:1235/gerbil-spotWrapNifWS4Test/myalgorithm
+- Name: whatever you wish
+- Press add annotator button
+- Select the datasets that you want to evaluate the model on
+- Run experiment
