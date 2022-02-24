@@ -96,7 +96,13 @@ mvn clean -Dmaven.tomcat.port=1235 tomcat:run
 ```
 4. On a third terminal/screen run:
 ```
-
+python gerbil_experiments/server.py  \
+--gpus 0,1,2,3  --log_path  /logs/log.txt --blink_dir //blink_model/  \
+--retriever_path /model_retriever/retriever.pt   \
+--cands_embeds_path /candidates_embeds/candidate_embeds.npy   \
+--ents_path /kb/entities_kilt.json  \
+--reader_path /model_reader/reader.pt   \
+--add_topic  --do_rerank  --bsz_retriever 8192  
 
 ```
 Open the url http://localhost:1234/gerbil
