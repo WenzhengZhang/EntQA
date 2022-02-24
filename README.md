@@ -42,7 +42,7 @@ python run_retriever.py \
 
 
 ```
-### Results
+### Retrieval Results
 | val Recall@100 | test Recall@100 | val LRAP | test LRAP | val hard Recall@100 | test hard Recall@100|
 |----------------|-----------------|----------|-----------|---------------------|---------------------|
 |  98.41%        |  96.95%         | 87.24%   |  86.00%   |   97.38%            |   94.97%            |
