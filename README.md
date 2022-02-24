@@ -74,6 +74,7 @@ python run_reader.py  \
 ### Reader Results
 
 |   val F1  |  test F1  |  val Recall |  test Recall |  val Precision  |  test Precision  |
+|-----------|-----------|-------------|--------------|-----------------|------------------|
 |   87.73%  |   84.74%  |   90.29%    |    86.73%    |     85.31%      |      84.74%      |
 
 ## GERBIL evaluation
