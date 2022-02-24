@@ -54,4 +54,21 @@ LRAP is [Label ranking average precision ](https://scikit-learn.org/stable/modul
 
 ## Train Reader 
 
+Train reader by
+
+```
+
+python run_reader.py  \
+--model /model_reader/reader.pt   --data_dir ./reader_input/  \
+--C 64  --B 4  --L 180  --C_val 100  --gpus 0,1,2,3   --val_bsz 32 \
+--gradient_accumulation_steps 2  --warmup_proportion 0.06  \
+--epochs 4  --lr 2e-5 --thresd  0.05  --logging_steps 100  \
+--k 3  --stride 16 --max_passage_len 32  --filter_span  \
+--type_encoder squad2_electra_large  \
+--type_span_loss sum_log  --type_rank_loss sum_log  \
+--do_rerank  --add_topic  --results_dir ./reader_results/  --kb_dir /kb/
+
+
+```
+
 ## GERBIL evaluation
