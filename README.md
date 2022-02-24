@@ -45,7 +45,7 @@ python run_retriever.py \
 ### Retrieval Results
 | val Recall@100 | test Recall@100 | val LRAP | test LRAP | val hard Recall@100 | test hard Recall@100|
 |----------------|-----------------|----------|-----------|---------------------|---------------------|
-|  98.41%        |  96.95%         | 87.24%   |  86.00%   |   97.38%            |   94.97%            |
+|     98.41%     |     96.95%      |   87.24% |    86.00% |       97.38%        |       94.97%        |
 
 
 Recall@k means the percentage of total number of positive entities retrieved by the topk candidates with respect to the total number of gold entities for all the query passages. \
