@@ -192,12 +192,14 @@ def compute_white_after_char(data):
 class ReaderTestData(Dataset):
     # get the input data item for the reader model
     def __init__(self, tokenizer, samples, max_len,
+                 max_passage_len,
                  max_num_candidates,
                  add_topic=True, use_title=False):
         self.tokenizer = tokenizer
         self.samples = samples
         # self.entities = entities  # {'title':{'text_ids','text_masks'}}
         self.max_len = max_len
+        self.max_passage_len = max_passage_len
         self.max_num_candidates = max_num_candidates
         self.add_topic = add_topic
         self.use_title = use_title
@@ -241,7 +243,7 @@ class ReaderTestData(Dataset):
         attention_masks = torch.zeros((self.max_num_candidates,
                                        self.max_len)).long()
         answer_masks = torch.zeros((self.max_num_candidates,
-                                    self.max_len)).long()
+                                    self.max_passage_len)).long()
         for i, candidate in enumerate(candidates):
             candidate_ids = candidate['text_ids']
             candidate_masks = candidate['text_masks']
@@ -262,5 +264,5 @@ class ReaderTestData(Dataset):
             encoded_pairs[i] = torch.tensor(input_ids)
             attention_masks[i] = torch.tensor(attention_mask)
             type_marks[i] = torch.tensor(token_type_ids)
-            answer_masks[i, :len(mention_ids)] = 1
+            answer_masks[i, :len(mention_ids)-1] = 1
         return encoded_pairs, attention_masks, type_marks, answer_masks
