@@ -13,7 +13,7 @@ conda install -c pytorch faiss-gpu cudatoolkit=11.0
 ```
 
 ## Download data & preprocess
-1.Download KILT wikipedia knowledge base [here](https://github.com/facebookresearch/KILT) and put it under a kb directory like /raw_kb/  \
+1. Download KILT wikipedia knowledge base [here](https://github.com/facebookresearch/KILT) and put it under a kb directory like /raw_kb/  \
 2. Download BLINK pretrained retriever model [here](https://github.com/facebookresearch/BLINK)  \
 3. Download AIDA CoNLL datasets [here](https://www.mpi-inf.mpg.de/departments/databases-and-information-systems/research/ambiverse-nlu/aida/downloads) and place them under a raw aida directory like /raw_aida/ \
 4. Download entity title map dictionary [here](https://drive.google.com/file/d/1QE3N8S_tVkGhYz_5fjRahLHfkIwghi-4/view?usp=sharing) and put it under /raw_aida/ for remapping outdated entities of AIDA datasets to KILT wikipedia entity titles \
@@ -30,7 +30,6 @@ python preprocess_data.py \
 
 Train retriever by 
 ```
-
 python run_retriever.py \
 --model /model_retriever/retriever.pt  --data_dir /retriever_input/   --kb_dir /kb/ \
 --k 100 --num_cands 64  --pretrained_path /blink/BLINK/models/ --gpus 0,1,2,3  --max_len 42   \
@@ -39,17 +38,15 @@ python run_retriever.py \
 --gradient_accumulation_steps 2  --type_loss sum_log_nce   \
 --cands_embeds_path /candidates_embeds/candidate_embeds.npy \
 --blink  --add_topic
-
-
 ```
 ### Retrieval Results
-| val Recall@100 | test Recall@100 | val LRAP | test LRAP | val hard Recall@100 | test hard Recall@100|
+| val Recall@100 | test Recall@100 | val LRAP | test LRAP | val passage-level Recall@100 | test passage-level Recall@100|
 |:----------------:|:-----------------:|:----------:|:-----------:|:---------------------:|:---------------------:|
 |     98.41%     |     96.95%      |   87.24% |    86.00% |       97.38%        |       94.97%        |
 
 
 **Recall@k** is the percentage of total number of positive entities retrieved by the topk candidates with respect to the total number of gold entities for all the query passages. \
-**hard Recall@k** is the percentage of the number of passages with all the gold entities retrieved in the topk candidates with respect to the number of passages. \
+**passage-level Recall@k** is the percentage of the number of passages with all the gold entities retrieved in the topk candidates with respect to the number of passages. \
 **LRAP** is [Label ranking average precision ](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.label_ranking_average_precision_score.html) which measures the multi-label ranking performance.
 
 
@@ -59,7 +56,6 @@ python run_retriever.py \
 Train reader by
 
 ```
-
 python run_reader.py  \
 --model /model_reader/reader.pt   --data_dir /reader_input/  \
 --C 64  --B 4  --L 180  --C_val 100  --gpus 0,1,2,3   --val_bsz 32 \
@@ -69,7 +65,6 @@ python run_reader.py  \
 --type_encoder squad2_electra_large  \
 --type_span_loss sum_log  --type_rank_loss sum_log  \
 --do_rerank  --add_topic  --results_dir /reader_results/  --kb_dir /kb/
-
 
 ```
 
