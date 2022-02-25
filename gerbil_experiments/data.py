@@ -80,10 +80,12 @@ def get_reader_input(samples, candidates, ents):
     return results
 
 
-def get_reader_loader(samples, tokenizer, max_len, max_num_candidates, bsz,
+def get_reader_loader(samples, tokenizer, max_len,
+                      max_passage_len,
+                      max_num_candidates, bsz,
                       add_topic, use_title):
     # TODO: call get_reader_input then get the reader loader
-    reader_set = ReaderTestData(tokenizer, samples, max_len,
+    reader_set = ReaderTestData(tokenizer, samples, max_len, max_passage_len,
                                 max_num_candidates, add_topic, use_title)
     reader_loader = DataLoader(reader_set, bsz, shuffle=False)
     return reader_loader
@@ -213,7 +215,6 @@ class ReaderTestData(Dataset):
     def __getitem__(self, index):
         # return input_ids, attention_masks, token_type_ids, start_positions,
         # end_positions, answer_mask
-        # TODO: use train gold map when positive is null
         sample = self.samples[index]
         title = None
         if self.add_topic:

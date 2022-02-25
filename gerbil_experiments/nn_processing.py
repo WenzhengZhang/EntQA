@@ -99,6 +99,7 @@ class Annotator(object):
                                           self.entities)
         reader_loader = get_reader_loader(samples_reader, self.tokenizer,
                                           self.args.max_len_reader,
+                                          self.args.max_passage_len,
                                           self.args.max_num_candidates,
                                           self.args.bsz_reader,
                                           self.args.add_topic,

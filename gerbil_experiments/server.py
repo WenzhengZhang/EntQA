@@ -130,7 +130,7 @@ if __name__ == "__main__":
                         help='probabilty threshold for evaluation on reader')
     parser.add_argument('--max_answer_len', type=int, default=10,
                         help='max length of answer [%(default)d]')
-    parser.add_argument('--max_q_len', type=int, default=32,
+    parser.add_argument('--max_passage_len', type=int, default=32,
                         help='max length of question [%(default)d] for reader')
     parser.add_argument('--document', type=str,
                         help='test document')
