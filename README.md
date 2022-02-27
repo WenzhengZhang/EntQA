@@ -76,7 +76,7 @@ python run_reader.py  \
 
 ## GERBIL evaluation
 Our GERBIL evaluation steps follow [here](https://github.com/dalab/end2end_neural_el), specifically:
-1. Download our snapshot of GERBIL repo [here](https://drive.google.com/file/d/1Sp-G9631ormzIYfenCDsaWgiBPVBkF6F/view?usp=sharing), our pretrained retriever [here]() and our pretrained reader [here]()
+1. Download our snapshot of GERBIL repo [here](https://drive.google.com/file/d/1Sp-G9631ormzIYfenCDsaWgiBPVBkF6F/view?usp=sharing), our pretrained retriever [here](), our cached entities embeddings [here](https://drive.google.com/file/d/1znMYd5HS80XpLpvpp_dFkQMbJiaFsQIn/view?usp=sharing) and our pretrained reader [here]()
 2. One one terminal/screen run GERBIL by:
 ```
 cd gerbil
