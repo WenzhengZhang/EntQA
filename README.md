@@ -46,7 +46,7 @@ It takes 10 hours on 4 A100 GPUs to finish the retriever training experiments. I
 ### Retrieval Results
 | val Recall@100 | test Recall@100 | val LRAP | test LRAP | val passage-level Recall@100 | test passage-level Recall@100|
 |:----------------:|:-----------------:|:----------:|:-----------:|:---------------------:|:---------------------:|
-|     98.17%     |     96.62%      |    |     |               |               |
+|     98.17%     |     96.62%      |  83.98%  |  82.65%   |      97.03%         |        94.59%       |
 
 
 **Recall@k** is the percentage of total number of positive entities retrieved by the topk candidates with respect to the total number of gold entities for all the query passages. \
@@ -79,7 +79,7 @@ python run_reader.py  \
 
 |   val F1  |  test F1  |  val Recall |  test Recall |  val Precision  |  test Precision  |
 |:-----------:|:-----------:|:-------------:|:--------------:|:-----------------:|:------------------:|
-|   87.32%  |   84.4%  |       |        |           |            |
+|   87.32%  |   84.4%  |   90.23%    |    87.0%    |     84.6%      |      81.96%      |
 
 ## GERBIL evaluation
 Our GERBIL evaluation steps follow [here](https://github.com/dalab/end2end_neural_el), specifically:
