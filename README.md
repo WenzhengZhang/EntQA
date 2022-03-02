@@ -39,10 +39,14 @@ python run_retriever.py \
 --cands_embeds_path /candidates_embeds/candidate_embeds.npy \
 --blink  --add_topic
 ```
+It takes 10 hours on 4 A100 GPUs to finish the retriever training experiments. It takes up 32G GPU memory for the main GPU and 23.8G GPU memory for other GPUs.
+### Retriever Local Evaluation
+1. You can train the retriever by yourself using the above scripts to get your trained retriever and entity embeddings. You can also Download our trained retriever [here](https://drive.google.com/file/d/1bHS5rxGbHJ5omQ-t8rjQogw7QJq-qYFO/view?usp=sharing), our cached entity embeddings [here](https://drive.google.com/file/d/1znMYd5HS80XpLpvpp_dFkQMbJiaFsQIn/view?usp=sharing). 
+2. Use the above training scripts and set `--epochs` to be 0 for evaluation.
 ### Retrieval Results
 | val Recall@100 | test Recall@100 | val LRAP | test LRAP | val passage-level Recall@100 | test passage-level Recall@100|
 |:----------------:|:-----------------:|:----------:|:-----------:|:---------------------:|:---------------------:|
-|     98.41%     |     96.95%      |   87.24% |    86.00% |       97.38%        |       94.97%        |
+|     98.17%     |     96.62%      |    |     |               |               |
 
 
 **Recall@k** is the percentage of total number of positive entities retrieved by the topk candidates with respect to the total number of gold entities for all the query passages. \
@@ -58,21 +62,24 @@ Train reader by
 ```
 python run_reader.py  \
 --model /model_reader/reader.pt   --data_dir /reader_input/  \
---C 64  --B 4  --L 180  --C_val 100  --gpus 0,1,2,3   --val_bsz 32 \
+--C 64  --B 2  --L 180  --C_val 100  --gpus 0,1   --val_bsz 32 \
 --gradient_accumulation_steps 2  --warmup_proportion 0.06  \
---epochs 4  --lr 2e-5 --thresd  0.05  --logging_steps 100  \
+--epochs 4  --lr 1e-5 --thresd  0.05  --logging_steps 100  \
 --k 3  --stride 16 --max_passage_len 32  --filter_span  \
 --type_encoder squad2_electra_large  \
 --type_span_loss sum_log  --type_rank_loss sum_log  \
 --do_rerank  --add_topic  --results_dir /reader_results/  --kb_dir /kb/
 
 ```
+### Reader Local Evaluation
+1. You can follow the above instructions to train your reader or you can download our trained reader [here](https://drive.google.com/file/d/1A4I1fJZKxmROIE1fd0mdXN6b1emP_xt4/view?usp=sharing)
+2. Use the above reader training scripts and set `--epochs` to be 0 for evaluation.
 
 ### Reader Results
 
 |   val F1  |  test F1  |  val Recall |  test Recall |  val Precision  |  test Precision  |
 |:-----------:|:-----------:|:-------------:|:--------------:|:-----------------:|:------------------:|
-|   87.73%  |   84.74%  |   90.29%    |    86.73%    |     85.31%      |      84.74%      |
+|   87.32%  |   84.4%  |       |        |           |            |
 
 ## GERBIL evaluation
 Our GERBIL evaluation steps follow [here](https://github.com/dalab/end2end_neural_el), specifically:
@@ -107,3 +114,8 @@ Open the url http://localhost:1234/gerbil
 - Press add annotator button
 - Select the datasets that you want to evaluate the model on
 - Run experiment
+
+### GERBIL Results
+| AIDA testb| MSNBC| Der|K50|R128|R500|OKE15|OKE16|AVG|
+|:---------:|:--------:|:----:|:---:|:----:|:----:|:-----:|:-----:|:----:|
+|85.82%|72.09%|52.85%|64.46%|54.05%|41.93%|61.10%|51.34%|60.46%|
