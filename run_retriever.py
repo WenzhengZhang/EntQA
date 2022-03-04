@@ -10,17 +10,11 @@ from transformers import BertTokenizer, BertModel, AdamW, \
 from datetime import datetime
 import json
 from collections import OrderedDict
-from util_dists import check_distributed
-import torch.distributed as dist
 from utils import Logger, strtime
 from sklearn.metrics import label_ranking_average_precision_score
 from data_retriever import load_data, get_loaders, \
     get_embeddings, get_hard_negative, save_candidates, get_labels, \
     get_entity_map, get_loader_from_candidates
-
-
-# TODO: check len(data_loader) for distributed sampler in order to verify
-#  optimizer is correct
 
 
 def set_seeds(args):
@@ -58,7 +52,6 @@ def load_model(is_init, config_path, model_path, device, type_loss,
     else:
         model = DualEncoder(ctxt_bert, cand_bert, type_loss)
         model.load_state_dict(state_dict['sd'])
-    #  model.to(device)
     return model
 
 
@@ -130,26 +123,13 @@ def count_parameters(model):
 
 
 def main(args):
+    start_time = datetime.now()
     set_seeds(args)
-    # configure logger and init distributed
+    # configure logger
     best_val_perf = float('-inf')
-    rank, local_rank, world_size = check_distributed()
-    is_main_process = local_rank in [-1, 0]
-    is_distributed = local_rank != -1
-    # check distributed values
-
-    logger = Logger(args.model + '.log', on=is_main_process)
+    logger = Logger(args.model + '.log', on=True)
     logger.log(str(args))
-    logger.log(f'rank {rank} local_rank {local_rank} world_size {world_size}',
-               force=True)
-
-    if local_rank == -1:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    else:
-        torch.cuda.set_device(local_rank)
-        device = torch.device('cuda', local_rank)
-        # torch.distributed.init_process_group('gloo')
-        torch.distributed.init_process_group('nccl')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     args.device = device
 
     logger.log(f'Using device: {str(device)}', force=True)
@@ -159,8 +139,6 @@ def main(args):
         load_data(args.data_dir, args.kb_dir)
     logger.log('number of entities {:d}'.format(len(entities)))
     # get model and tokenizer
-    # if not is_main_process and is_distributed:
-    #     dist.barrier()  # only first process download
     tokenizer = BertTokenizer.from_pretrained('bert-large-uncased')
     max_num_positives = args.k - args.num_cands
     config = {
@@ -186,8 +164,6 @@ def main(args):
         optimizer.load_state_dict(cpt['opt_sd'])
         scheduler.load_state_dict(cpt['scheduler_sd'])
         best_val_perf = cpt['perf']
-    # if local_rank == 0 and is_distributed:
-    #     dist.barrier()
     model.to(device)
     if args.fp16:
         try:
@@ -197,33 +173,22 @@ def main(args):
                 "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
         model, optimizer = amp.initialize(model, optimizer,
                                           opt_level=args.fp16_opt_level)
-    if is_distributed:
-        args.n_gpu = 1
-    else:
-        args.n_gpu = torch.cuda.device_count()
+    args.n_gpu = torch.cuda.device_count()
     dp = args.n_gpu > 1
     if dp:
         logger.log('Data parallel across {:d} GPUs {:s}'
                    ''.format(len(args.gpus.split(',')), args.gpus))
         model = nn.DataParallel(model)
-    if is_distributed:
-        logger.log('DDP wrapping')
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[local_rank], output_device=local_rank,
-            find_unused_parameters=True)
     train_men_loader, val_men_loader, test_men_loader, entity_loader = \
         get_loaders(samples_train, samples_val, samples_test, entities,
                     args.max_len, tokenizer, args.mention_bsz,
-                    args.entity_bsz, args.add_topic, args.use_title,
-                    is_distributed, world_size, rank, args.seed)
+                    args.entity_bsz, args.add_topic, args.use_title)
     entity_map = get_entity_map(entities)
     train_labels = get_labels(samples_train, entity_map)
     val_labels = get_labels(samples_val, entity_map)
     test_labels = get_labels(samples_test, entity_map)
     model.train()
     effective_bsz = args.B * args.gradient_accumulation_steps
-    if is_distributed:
-        effective_bsz *= world_size
     # train
     logger.log('***** train *****')
     logger.log('# train samples: {:d}'.format(num_train_samples))
@@ -251,12 +216,11 @@ def main(args):
     model.zero_grad()
     all_cands_embeds = None
     logger.log('get candidates embeddings')
-    if args.resume_training:
+    if args.resume_training or args.epochs == 0:
         # we store candidates embeddings after each epoch
         all_cands_embeds = np.load(args.cands_embeds_path)
-    elif args.rands_ratio != 1.0:
-        all_cands_embeds = get_embeddings(entity_loader, model, False, device,
-                                          is_distributed, world_size)
+    elif args.rands_ratio != 1.0 and args.epochs != 0:
+        all_cands_embeds = get_embeddings(entity_loader, model, False, device)
 
     for epoch in range(start_epoch, args.epochs + 1):
         logger.log('\nEpoch {:d}'.format(epoch))
@@ -265,15 +229,11 @@ def main(args):
         if args.rands_ratio == 1.0:
             logger.log('no need to mine hard negatives')
             candidates = None
-            # if not is_main_process:
-            #     dist.barrier()
         else:
             mention_embeds = get_embeddings(train_men_loader, model, True,
-                                            device, is_distributed, world_size)
+                                            device)
             logger.log('mining hard negatives')
             mining_start_time = datetime.now()
-            # if not is_main_process:
-            #     dist.barrier()
             candidates = get_hard_negative(mention_embeds, all_cands_embeds,
                                            args.num_cands,
                                            max_num_positives,
@@ -288,24 +248,15 @@ def main(args):
                                                   args.rands_ratio,
                                                   args.type_loss,
                                                   args.add_topic,
-                                                  args.use_title, True, args.B,
-                                                  is_distributed, world_size,
-                                                  rank, args.seed)
-        # logger.log('len train loader {:d} vs '
-        #            'num batches{:d}'.format(len(train_loader),
-        #                                     len(samples_train) // (
-        #                                             args.B * world_size)))
-        # if local_rank == 0:
-        #     dist.barrier()
+                                                  args.use_title, True, args.B)
         epoch_train_start_time = datetime.now()
         for step, batch in enumerate(train_loader):
             model.train()
-            # if is_main_process:
             bsz = batch[0].size(0)
             batch = tuple(t.to(device) for t in batch)
             loss = model(*batch)[0]
             if dp:
-                loss = loss.sum()/bsz
+                loss = loss.sum() / bsz
             else:
                 loss /= bsz
             loss_avg = loss / args.gradient_accumulation_steps
@@ -317,8 +268,6 @@ def main(args):
             tr_loss += loss_avg.item()
 
             if (step + 1) % args.gradient_accumulation_steps == 0:
-                # if is_distributed:
-                #     scale_grad(model, world_size)
                 if args.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer),
                                                    args.clip)
@@ -342,10 +291,8 @@ def main(args):
 
         logger.log('training time for epoch {:3d} '
                    'is {:s}'.format(epoch, strtime(epoch_train_start_time)))
-        all_cands_embeds = get_embeddings(entity_loader, model, False, device,
-                                          is_distributed, world_size)
-        all_mention_embeds = get_embeddings(val_men_loader, model, True, device,
-                                            is_distributed, world_size)
+        all_cands_embeds = get_embeddings(entity_loader, model, False, device)
+        all_mention_embeds = get_embeddings(val_men_loader, model, True, device)
         top_k, scores_k = get_hard_negative(all_mention_embeds,
                                             all_cands_embeds, args.k,
                                             0, args.use_gpu_index)
@@ -368,49 +315,36 @@ def main(args):
             logger.log('------- new best val perf: {:g} --> {:g} '
                        ''.format(best_val_perf, current_best))
             best_val_perf = current_best
-            if is_main_process:
-                torch.save({'opt': args,
-                            'sd': model.module.state_dict() if dp or
-                                                               is_distributed else model.state_dict(),
-                            'perf': best_val_perf, 'epoch': epoch,
-                            'opt_sd': optimizer.state_dict(),
-                            'scheduler_sd': scheduler.state_dict(),
-                            'tr_loss': tr_loss, 'step_num': step_num,
-                            'logging_loss': logging_loss},
-                           args.model)
-                np.save(args.cands_embeds_path, all_cands_embeds)
+            torch.save({'opt': args,
+                        'sd': model.module.state_dict() if dp else model.state_dict(),
+                        'perf': best_val_perf, 'epoch': epoch,
+                        'opt_sd': optimizer.state_dict(),
+                        'scheduler_sd': scheduler.state_dict(),
+                        'tr_loss': tr_loss, 'step_num': step_num,
+                        'logging_loss': logging_loss},
+                       args.model)
+            np.save(args.cands_embeds_path, all_cands_embeds)
         else:
             logger.log('')
-    # if not is_main_process and is_distributed:
-    #     dist.barrier()
     model = load_model(False, config['biencoder_config'],
                        args.model, device,
                        args.type_loss,
                        args.blink)
-    # all_cands_embeds = np.load(args.cands_embeds_path)
-    # if local_rank == 0 and is_distributed:
-    #     dist.barrier()
     model.to(device)
     if dp:
         logger.log('Data parallel across {:d} GPUs {:s}'
                    ''.format(len(args.gpus.split(',')), args.gpus))
         model = nn.DataParallel(model)
-    if is_distributed:
-        logger.log('DDP wrapping')
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[local_rank], output_device=local_rank,
-            find_unused_parameters=True)
     model.eval()
+    all_cands_embeds = np.load(args.cands_embeds_path)
     logger.log('getting test mention embeddings ...')
-    test_mention_embeds = get_embeddings(test_men_loader, model, True, device,
-                                         is_distributed, world_size)
+    test_mention_embeds = get_embeddings(test_men_loader, model, True, device)
     start_time_test_infer = datetime.now()
     top_k_test, scores_k_test = get_hard_negative(test_mention_embeds,
                                                   all_cands_embeds,
                                                   args.k, 0, args.use_gpu_index)
     logger.log('test inference time {:s}'
                ''.format(strtime(start_time_test_infer)))
-    # del test_mention_embeds
     test_result = evaluate(scores_k_test,
                            top_k_test, test_labels)
     logger.log(' test hard recall@{:d} : {:8.4f}'
@@ -421,13 +355,9 @@ def main(args):
                          test_result[1],
                          test_result[2]))
     logger.log('saving test pairs')
-    if is_main_process:
-        save_candidates(samples_test, top_k_test, entity_map, test_labels,
-                        args.out_dir, 'test')
-    # if local_rank == 0:
-    #     dist.barrier()
-    val_mention_embeds = get_embeddings(val_men_loader, model, True, device,
-                                        is_distributed, world_size)
+    save_candidates(samples_test, top_k_test, entity_map, test_labels,
+                    args.out_dir, 'test')
+    val_mention_embeds = get_embeddings(val_men_loader, model, True, device)
     start_time_val_infer = datetime.now()
     top_k_val, scores_k_val = get_hard_negative(val_mention_embeds,
                                                 all_cands_embeds, args.k, 0,
@@ -437,25 +367,29 @@ def main(args):
                ''.format(strtime(start_time_val_infer),
                          str((datetime.now() - start_time_val_infer) / len(
                              samples_val))))
-    # del val_mention_embeds
+    val_result = evaluate(scores_k_val,
+                          top_k_val, val_labels)
+    logger.log(' val hard recall@{:d} : {:8.4f}'
+               '| val LRAP : {:8.4f}| '
+               'val recall : {:8.4f}| '
+               ''.format(args.k,
+                         val_result[0],
+                         val_result[1],
+                         val_result[2]))
     logger.log('saving val pairs')
-    if is_main_process:
-        save_candidates(samples_val, top_k_val, entity_map, val_labels,
-                        args.out_dir, 'val')
-    # if local_rank == 0:
-    #     dist.barrier()
+    save_candidates(samples_val, top_k_val, entity_map, val_labels,
+                    args.out_dir, 'val')
     train_mention_embeds = get_embeddings(train_men_loader, model, True,
-                                          device, is_distributed, world_size)
+                                          device)
     top_k_train, scores_k_train = get_hard_negative(train_mention_embeds,
                                                     all_cands_embeds, args.k,
                                                     0, args.use_gpu_index)
-    # del train_mention_embeds
     logger.log('saving train pairs')
-    if is_main_process:
-        save_candidates(samples_train, top_k_train, entity_map,
-                        train_labels,
-                        args.out_dir,
-                        'train')
+    save_candidates(samples_train, top_k_train, entity_map,
+                    train_labels,
+                    args.out_dir,
+                    'train')
+    logger.log('experiments time {:s}'.format(strtime(start_time)))
 
 
 if __name__ == '__main__':
@@ -542,12 +476,7 @@ if __name__ == '__main__':
                         help='the directory of candidates embeddings')
     parser.add_argument('--use_cached_embeds', action='store_true',
                         help='use cached candidates embeddings ?')
-    # parser.add_argument("--local_rank", type=int, default=-1,
-    #                     help="For distributed training: local_rank")
-    # parser.add_argument("--main_port", type=int, default=-1,
-    #                     help="Main port (for multi-node SLURM jobs)")
     args = parser.parse_args()
     # Set environment variables before all else.
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus  # Sets torch.cuda behavior
-    # init_distributed_mode(args)
     main(args)

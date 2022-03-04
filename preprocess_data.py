@@ -8,8 +8,6 @@ import os
 from copy import deepcopy
 
 
-# TODO: remap entities
-
 def compute_length(text_list, word_length):
     length = 0
     for token in text_list[:-word_length]:

@@ -1,5 +1,4 @@
 import argparse
-import numpy as np
 import os
 import torch
 import torch.nn as nn
@@ -13,63 +12,32 @@ from transformers import BertTokenizer, BertModel, ElectraModel, \
 from sklearn.metrics import label_ranking_average_precision_score
 from run_retriever import configure_optimizer, configure_optimizer_simple, \
     set_seeds
-import torch.distributed as dist
-from util_dists import check_distributed
 import pickle as pkl
-
-
-# import json
 
 
 def get_raw_results(model, device, loader, k, samples,
                     do_rerank,
-                    is_distributed, world_size=None,
                     filter_span=True,
                     no_multi_ents=False):
     model.eval()
     ranking_scores = []
     ranking_labels = []
     ps = []
-    bids = []
     with torch.no_grad():
         for _, batch in enumerate(loader):
             batch = tuple(t.to(device) for t in batch)
-            bid = batch[-1]
             if do_rerank:
-                batch_p, rank_logits_b = model(*batch[:-1])
+                batch_p, rank_logits_b = model(*batch)
             else:
-                batch_p = model(*batch[:-1]).detach()
-            # TODO: write a function for this part
-            if is_distributed:
-                bid.squeeze_(1)
-                p_list = [torch.zeros_like(batch_p) for _ in range(
-                    world_size)]
-                bid_list = [torch.zeros_like(bid) for _ in range(
-                    world_size)]
-                dist.all_gather(tensor_list=p_list,
-                                tensor=batch_p.contiguous())
-                dist.all_gather(tensor_list=bid_list,
-                                tensor=bid.contiguous())
-                batch_p = torch.cat(p_list, 0).cpu()
-                bid = torch.cat(bid_list, 0).cpu().numpy()
-                bids.append(bid)
-                ps.append(batch_p)
-            else:
-                batch_p = batch_p.cpu()
-                ps.append(batch_p)
+                batch_p = model(*batch).detach()
+            batch_p = batch_p.cpu()
+            ps.append(batch_p)
             if do_rerank:
                 ranking_scores.append(rank_logits_b.cpu())
                 ranking_labels.append(batch[4].cpu())
         ps = torch.cat(ps, 0)
-        if is_distributed:
-            bids = np.concatenate(bids, 0)
-            ps = ps[np.unique(bids, return_index=True)[1]]
-    print(ps.size(0))
     raw_predicts = get_predicts(ps, k, filter_span, no_multi_ents)
-    try:
-        assert len(raw_predicts) == len(samples)
-    except AssertionError:
-        print((len(raw_predicts), len(samples)))
+    assert len(raw_predicts) == len(samples)
     if do_rerank:
         ranking_scores = torch.cat(ranking_scores, 0)
         ranking_labels = torch.cat(ranking_labels, 0)
@@ -117,18 +85,18 @@ def count_parameters(model):
 
 
 def load_model(is_init, model_path, type_encoder, device, type_span_loss,
-               do_rerank, type_rank_loss, max_answer_len):
+               do_rerank, type_rank_loss, max_answer_len, max_passage_len):
     if is_init:
         encoder, tokenizer = get_encoder(type_encoder, True)
         model = Reader(encoder, type_span_loss, do_rerank, type_rank_loss,
-                       max_answer_len)
+                       max_answer_len, max_passage_len)
         return model, tokenizer
     else:
         encoder = get_encoder(type_encoder, False)
         package = torch.load(model_path) if device.type == 'cuda' else \
             torch.load(model_path, map_location=torch.device('cpu'))
         model = Reader(encoder, type_span_loss, do_rerank, type_rank_loss,
-                       max_answer_len)
+                       max_answer_len, max_passage_len)
         try:
             model.load_state_dict(package['sd'])
         except RuntimeError:
@@ -138,7 +106,9 @@ def load_model(is_init, model_path, type_encoder, device, type_span_loss,
             new_state_dict = OrderedDict()
             for k, v in state_dict.items():
                 name = k[7:]  # remove `module.`
-                new_state_dict[name] = v
+                # for loading our old version reader model
+                if name != 'topic_query':
+                    new_state_dict[name] = v
             model.load_state_dict(new_state_dict)
         return model
 
@@ -180,27 +150,11 @@ def get_encoder(type_encoder, return_tokenizer=False):
 
 def main(args):
     set_seeds(args)
-    # configure logger and init distributed
+    # configure logger
     best_val_perf = float('-inf')
-    best_val_thresd = 0
-    rank, local_rank, world_size = check_distributed()
-    is_main_process = local_rank in [-1, 0]
-    is_distributed = local_rank != -1
-    # check distributed values
-    # assert is_distributed == dist.is_initialized()
-    # assert world_size == dist.get_world_size()
-
-    logger = Logger(args.model + '.log', on=is_main_process)
+    logger = Logger(args.model + '.log', on=True)
     logger.log(str(args))
-    logger.log(f'rank {rank} local_rank {local_rank} world_size {world_size}',
-               force=True)
-
-    if local_rank == -1:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    else:
-        torch.cuda.set_device(local_rank)
-        device = torch.device('cuda', local_rank)
-        torch.distributed.init_process_group('nccl')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.log(f'Using device: {str(device)}', force=True)
     # load data and get dataloaders
     data = load_data(args.data_dir, args.kb_dir)
@@ -208,11 +162,10 @@ def main(args):
     p_val_golds, p_test_golds = get_golds(data[0], data[1], data[2])
 
     # get model and tokenizer
-    if not is_main_process:
-        dist.barrier()
     model, tokenizer = load_model(True, args.model, args.type_encoder, device,
                                   args.type_span_loss, args.do_rerank,
-                                  args.type_rank_loss, args.max_answer_len)
+                                  args.type_rank_loss, args.max_answer_len,
+                                  args.max_passage_len)
     if args.simpleoptim:
         optimizer, scheduler, num_train_steps, num_warmup_steps \
             = configure_optimizer_simple(args, model, len(data[0]))
@@ -226,19 +179,13 @@ def main(args):
         optimizer.load_state_dict(cpt['opt_sd'])
         scheduler.load_state_dict(cpt['scheduler_sd'])
         best_val_perf = cpt['perf']
-        best_val_thresd = cpt['val_thresd']
-    if local_rank == 0:
-        dist.barrier()
     model.to(device)
     loader_train, loader_dev, loader_test = get_loaders(tokenizer, data, args.L,
-                                                        args.max_passage_len,
+                                                        # args.max_passage_len,
                                                         args.C, args.C_val,
                                                         args.B, args.val_bsz,
                                                         args.add_topic,
-                                                        args.use_title,
-                                                        is_distributed,
-                                                        world_size, rank,
-                                                        args.seed)
+                                                        args.use_title)
 
     if args.fp16:
         try:
@@ -248,23 +195,13 @@ def main(args):
                 "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
         model, optimizer = amp.initialize(model, optimizer,
                                           opt_level=args.fp16_opt_level)
-    if is_distributed:
-        args.n_gpu = 1
-    else:
-        args.n_gpu = torch.cuda.device_count()
+    args.n_gpu = torch.cuda.device_count()
     dp = args.n_gpu > 1
     if dp:
         logger.log('Data parallel across {:d} GPUs {:s}'
                    ''.format(len(args.gpus.split(',')), args.gpus))
         model = nn.DataParallel(model)
-    if is_distributed:
-        logger.log('DDP wrapping')
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[local_rank], output_device=local_rank,
-            find_unused_parameters=True)
     effective_bsz = args.B * args.gradient_accumulation_steps
-    if is_distributed:
-        effective_bsz *= world_size
     logger.log('\n[TRAIN]')
     logger.log('  # train samples: %d' % len(data[0]))
     logger.log('  # dev samples: %d' % len(data[1]))
@@ -320,17 +257,14 @@ def main(args):
                 model.zero_grad()
                 step_num += 1
 
-                # writer.add_scalar('lr', scheduler.get_last_lr()[0], step_num)
                 if step_num % args.logging_steps == 0:
                     avg_loss = (tr_loss - logging_loss) / args.logging_steps
-                    # writer.add_scalar('avg_loss', avg_loss, step_num)
                     logger.log('Step {:10d}/{:d} | Epoch {:3d} | '
                                'Batch {:5d}/{:5d} | '
                                'Average Loss {:8.4f}'.format(
                         step_num, num_train_steps, epoch,
                         step, len(loader_train), avg_loss))
                     logging_loss = tr_loss
-                # writer.add_scalar('acc_val', eval_result['acc'], step_num)
         logger.log('training time for epoch {:3d} is '
                    '{:s}'.format(epoch, strtime(start_time_epoch)))
         logger.log('validating...')
@@ -338,7 +272,6 @@ def main(args):
         val_raw_predicts, val_rank_scores, val_rank_labels = get_raw_results(
             model, device, loader_dev,
             args.k, data[1], args.do_rerank,
-            is_distributed, world_size,
             args.filter_span,
             args.no_multi_ents)
         pruned_val_preds = prune_predicts(val_raw_predicts, args.thresd)
@@ -365,29 +298,20 @@ def main(args):
                        (best_val_perf, val_result['F1']))
             best_val_perf = val_result['F1']
             torch.save({'opt': args,
-                        'sd': model.module.state_dict() if dp or
-                                                           is_distributed else model.state_dict(),
+                        'sd': model.module.state_dict() if dp else model.state_dict(),
                         'perf': best_val_perf,
                         'val_thresd': args.thresd}, args.model)
         else:
             logger.log('')
-    if not is_main_process:
-        dist.barrier()
     model = load_model(False, args.model, args.type_encoder,
                        device, args.type_span_loss, args.do_rerank,
-                       args.type_rank_loss, args.max_answer_len)
-    if local_rank == 0:
-        dist.barrier()
+                       args.type_rank_loss, args.max_answer_len,
+                       args.max_passage_len)
     model.to(device)
     if dp:
         logger.log('Data parallel across {:d} GPUs {:s}'
                    ''.format(len(args.gpus.split(',')), args.gpus))
         model = nn.DataParallel(model)
-    if is_distributed:
-        logger.log('DDP wrapping')
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[local_rank], output_device=local_rank,
-            find_unused_parameters=True)
     model.eval()
     # print([d['candidates'][:3] for d in data[2]])
     logger.log('getting test raw predicts')
@@ -395,26 +319,24 @@ def main(args):
     test_raw_predicts, test_rank_scores, test_rank_labels = get_raw_results(
         model, device, loader_test,
         args.k, data[2], args.do_rerank,
-        is_distributed, world_size,
         args.filter_span,
         args.no_multi_ents)
 
-    logger.log('test inference time {:s}'.format(strtime(
-        start_time_test_infer)))
-    logger.log('per val instance inference time {:s}'.format(str((
-        (datetime.now()-start_time_test_infer) / len(data[2])))))
-    if is_main_process:
-        logger.log('save test results')
-        test_save_path = os.path.join(args.results_dir, 'test_raw')
-        with open(test_save_path, 'wb') as f:
-            pkl.dump(test_raw_predicts, f)
     logger.log('prune and evaluate test...')
     pruned_test_preds = prune_predicts(test_raw_predicts, args.thresd)
     test_predicts = transform_predicts(pruned_test_preds, data[-1],
                                        data[2])
-    if is_main_process:
-        save_results(test_predicts, p_test_golds, data[2], args.results_dir,
-                     'test')
+    logger.log('test inference time {:s}'.format(strtime(
+        start_time_test_infer)))
+    logger.log('per val instance inference time {:s}'.format(str((
+            (datetime.now() - start_time_test_infer) / len(data[2])))))
+
+    logger.log('save test results')
+    test_save_path = os.path.join(args.results_dir, 'test_raw')
+    with open(test_save_path, 'wb') as f:
+        pkl.dump(test_raw_predicts, f)
+    save_results(test_predicts, p_test_golds, data[2], args.results_dir,
+                 'test')
     test_result = evaluate_after_prune(logger, test_predicts,
                                        test_golds_doc, data[2])
     logger.log('\nDone training | training time {:s} | '
@@ -433,25 +355,22 @@ def main(args):
     val_raw_predicts, val_rank_scores, val_rank_labels = get_raw_results(
         model, device, loader_dev,
         args.k, data[1], args.do_rerank,
-        is_distributed, world_size,
         args.filter_span,
         args.no_multi_ents)
-    logger.log('val inference time {:s}'.format(strtime(
-        start_time_val_infer)))
-    logger.log('per val instance inference time {:s}'.format(str((
-            (datetime.now() - start_time_val_infer) / len(data[1])))))
-    if is_main_process:
-        logger.log('save val results')
-        val_save_path = os.path.join(args.results_dir, 'val_raw')
-        with open(val_save_path, 'wb') as f:
-            pkl.dump(val_raw_predicts, f)
     logger.log('prune and evaluate val ...')
     pruned_val_preds = prune_predicts(val_raw_predicts, args.thresd)
     val_predicts = transform_predicts(pruned_val_preds, data[-1],
                                       data[1])
-    if is_main_process:
-        save_results(val_predicts, p_val_golds, data[1], args.results_dir,
-                     'val')
+    logger.log('val inference time {:s}'.format(strtime(
+        start_time_val_infer)))
+    logger.log('per val instance inference time {:s}'.format(str((
+            (datetime.now() - start_time_val_infer) / len(data[1])))))
+    logger.log('save val results')
+    val_save_path = os.path.join(args.results_dir, 'val_raw')
+    with open(val_save_path, 'wb') as f:
+        pkl.dump(val_raw_predicts, f)
+    save_results(val_predicts, p_val_golds, data[1], args.results_dir,
+                 'val')
     val_result = evaluate_after_prune(logger, val_predicts,
                                       val_golds_doc, data[1])
 
@@ -481,8 +400,7 @@ if __name__ == '__main__':
                         help='max length of joint input [%(default)d]')
     parser.add_argument('--max_passage_len', type=int, default=32,
                         help='max length of passage [%(default)d]')
-    # parser.add_argument('--max_len_doc', type=int, default=3430,
-    #                     help='max length of document [%(default)d]')
+
     parser.add_argument('--filter_span', action='store_true',
                         help='filter span?')
     parser.add_argument('--resume_training', action='store_true',

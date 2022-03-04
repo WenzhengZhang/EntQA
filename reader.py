@@ -11,7 +11,8 @@ class Reader(nn.Module):
                  type_span_loss,
                  do_rerank,
                  type_rank_loss,
-                 max_answer_len):
+                 max_answer_len,
+                 max_passage_len):
         super(Reader, self).__init__()
         self.encoder = encoder
         self.span_loss_fct = MultiLabelLoss(type_span_loss)
@@ -19,6 +20,7 @@ class Reader(nn.Module):
         self.do_rerank = do_rerank
         # maximum answer(mention span) length
         self.max_answer_len = max_answer_len
+        self.max_passage_len = max_passage_len
         self.dim_hidden = self.encoder.config.hidden_size
         self.qa_outputs = nn.Linear(self.dim_hidden, 2)
         self.qa_classifier = nn.Linear(self.dim_hidden, 1)
@@ -51,7 +53,8 @@ class Reader(nn.Module):
                 -1)
         # B x C x max_passage_len x max_passage_len
         mention_probs = mention_probs.exp().triu(0).tril(self.max_answer_len
-                                                         - 1)
+                                                         - 1)[:, :,
+                        :self.max_passage_len, :self.max_passage_len]
         if self.do_rerank:
             return mention_probs, rank_logits
         return mention_probs
@@ -65,7 +68,7 @@ class Reader(nn.Module):
                 end_labels=None):
         # batchsize, number of candidates per question, length
         B, C, L = input_ids.size()
-        max_passage_len = answer_mask.size(-1)
+        # max_passage_len = answer_mask.size(-1)
         input_ids = input_ids.view(-1, L)
         attention_mask = attention_mask.view(-1, L)
         token_type_ids = token_type_ids.view(-1, L)
@@ -73,11 +76,14 @@ class Reader(nn.Module):
         last_hiddens = self.encoder(input_ids=input_ids,
                                     attention_mask=attention_mask,
                                     token_type_ids=token_type_ids)[0]
-        span_logits = self.qa_outputs(last_hiddens[:, :max_passage_len])
+        span_logits = self.qa_outputs(last_hiddens)
+        # span_logits = self.qa_outputs(last_hiddens[:, :max_passage_len])
         start_logits, end_logits = span_logits.split(1, dim=-1)
         # BC x max_passage_len
-        start_logits = start_logits.squeeze(-1).view(B, C, max_passage_len)
-        end_logits = end_logits.squeeze(-1).view(B, C, max_passage_len)
+        start_logits = start_logits.squeeze(-1).view(B, C, L)
+        end_logits = end_logits.squeeze(-1).view(B, C, L)
+        # start_logits = start_logits.squeeze(-1).view(B, C, max_passage_len)
+        # end_logits = end_logits.squeeze(-1).view(B, C, max_passage_len)
         rank_logits = None
         if self.do_rerank:
             rank_logits = self.qa_classifier(last_hiddens[:, 0, :]).view(B, C)

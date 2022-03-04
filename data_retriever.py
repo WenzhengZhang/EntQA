@@ -4,10 +4,9 @@ from torch.utils.data import DataLoader, Dataset
 import os
 import numpy as np
 import faiss
-from utils import OrderedSet, sample_range_excluding
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as dist
+from utils import sample_range_excluding
 import random
+from preprocess_data import normalize_string
 
 
 # for embedding entities during inference
@@ -22,8 +21,7 @@ class EntitySet(Dataset):
         entity = self.entities[index]
         entity_token_ids = torch.tensor(entity['text_ids']).long()
         entity_masks = torch.tensor(entity['text_masks']).long()
-        entity_idx = torch.tensor([index]).long()
-        return entity_token_ids, entity_masks, entity_idx
+        return entity_token_ids, entity_masks
 
 
 # For embedding all the mentions during inference
@@ -38,7 +36,6 @@ class MentionSet(Dataset):
         self.use_title = use_title
         # [2] is token id of '[unused1]' for bert tokenizer
         self.TT = [2]
-        # self.TT = self.tokenizer.convert_tokens_to_ids(['[unused1]'])
 
     def __len__(self):
         return len(self.mentions)
@@ -50,17 +47,15 @@ class MentionSet(Dataset):
             title_ids = self.TT + title
         else:
             title_ids = []
-        # CLS + mention ids + TT + title ids + SEP
-        mention_title_ids = mention['text'][:-1] + title_ids + [mention['text'][
-                                                                    -1]]
+        # CLS + mention ids + TT + title ids
+        mention_title_ids = mention['text']+title_ids
         mention_ids = (mention_title_ids + [self.tokenizer.pad_token_id] * (
                 self.max_len - len(mention_title_ids)))[:self.max_len]
         mention_masks = ([1] * len(mention_title_ids) + [0] * (
                 self.max_len - len(mention_title_ids)))[:self.max_len]
         mention_token_ids = torch.tensor(mention_ids).long()
         mention_masks = torch.tensor(mention_masks).long()
-        mention_idx = torch.tensor([index]).long()
-        return mention_token_ids, mention_masks, mention_idx
+        return mention_token_ids, mention_masks
 
 
 def get_labels(samples, all_entity_map):
@@ -74,11 +69,6 @@ def get_labels(samples, all_entity_map):
         labels.append(label_list)
     labels = np.array(labels)
     return labels
-
-
-def normalize_string(s):
-    s = s.replace('_', ' ')
-    return eval(repr(s).replace('\\\\', '\\'))
 
 
 def get_group_indices(samples):
@@ -120,7 +110,6 @@ class RetrievalSet(Dataset):
         self.use_title = use_title
         # '[unused1]' for bert tokenizer
         self.TT = [2]
-        # self.TT = self.tokenizer.convert_tokens_to_ids(['[unused1]'])
 
     def __len__(self):
         return len(self.mentions)
@@ -139,9 +128,8 @@ class RetrievalSet(Dataset):
             title_ids = self.TT + title
         else:
             title_ids = []
-        # CLS + mention ids + TT + title ids + SEP
-        mention_title_ids = mention['text'][:-1] + title_ids + [mention['text'][
-                                                                    -1]]
+        # CLS + mention ids + TT + title ids
+        mention_title_ids = mention['text'] + title_ids
         mention_ids = mention_title_ids + [self.tokenizer.pad_token_id] * (
                 self.max_len - len(mention_title_ids))
         mention_masks = [1] * len(mention_title_ids) + [0] * (
@@ -170,11 +158,9 @@ class RetrievalSet(Dataset):
         cand_ids += rand_cands
         # process hard negatives
         if self.candidates is not None:
-            # hard negatives keep order
+            # hard negatives
             hard_negs = random.sample(list(set(self.candidates[index]) - set(
                 labels)), num_hards)
-            # hard_negs = list(OrderedSet(self.candidates[index]) - OrderedSet(
-            #     labels))[:num_hards]
             cand_ids += hard_negs
         passage_labels = torch.tensor([1] * num_pos + [0] * num_neg).long()
         candidate_token_ids = self.all_entity_token_ids[cand_ids].tolist()
@@ -217,44 +203,20 @@ def load_data(data_dir, kb_dir):
     return samples_train, samples_val, samples_test, entities
 
 
-def get_embeddings(loader, model, is_mention, device,
-                   is_distributed,
-                   world_size=None):
+def get_embeddings(loader, model, is_mention, device):
     model.eval()
     embeddings = []
-    bids = []
     with torch.no_grad():
         for i, batch in enumerate(loader):
             batch = tuple(t.to(device) for t in batch)
-            input_ids, input_masks, bid = batch
+            input_ids, input_masks = batch
             k1, k2 = ('mention_token_ids', 'mention_masks') if is_mention else \
                 ('entity_token_ids', 'entity_masks')
             kwargs = {k1: input_ids, k2: input_masks}
             j = 0 if is_mention else 2
             embed = model(**kwargs)[j].detach()
-            if is_distributed:
-                bid.squeeze_(1)
-                embed_list = [torch.zeros_like(embed) for _ in range(
-                    world_size)]
-                bid_list = [torch.zeros_like(bid) for _ in range(
-                    world_size)]
-                dist.all_gather(tensor_list=embed_list,
-                                tensor=embed.contiguous(),
-                                async_op=False)
-                dist.all_gather(tensor_list=bid_list,
-                                tensor=bid.contiguous(),
-                                async_op=False)
-                embed = torch.cat(embed_list, 0).cpu().numpy()
-                bid = torch.cat(bid_list, 0).cpu().numpy()
-                embeddings.append(embed)
-                bids.append(bid)
-                # numpy unique also sort list
-            else:
-                embeddings.append(embed.cpu().numpy())
+            embeddings.append(embed.cpu().numpy())
     embeddings = np.concatenate(embeddings, axis=0)
-    if is_distributed:
-        bids = np.concatenate(bids, axis=0)
-        embeddings = embeddings[np.unique(bids, return_index=True)[1]]
     model.train()
     return embeddings
 
@@ -273,40 +235,28 @@ def get_hard_negative(mention_embeddings, all_entity_embeds, k,
     return hard_indices, scores
 
 
-def make_single_loader(data_set, bsz, shuffle,
-                       is_distributed, world_size=None,
-                       rank=None, seed=None):
-    if is_distributed:
-        sampler = DistributedSampler(data_set, num_replicas=world_size,
-                                     rank=rank, shuffle=shuffle,
-                                     seed=seed, drop_last=False)
-        loader = DataLoader(data_set, bsz, sampler=sampler)
-    else:
-        loader = DataLoader(data_set, bsz, shuffle=shuffle)
+def make_single_loader(data_set, bsz, shuffle):
+    loader = DataLoader(data_set, bsz, shuffle=shuffle)
     return loader
 
 
 def get_loader_from_candidates(samples, entities, labels, max_len,
                                tokenizer, candidates,
                                num_cands, rands_ratio, type_loss,
-                               add_topic, use_title, shuffle, bsz,
-                               is_distributed, world_size=None,
-                               rank=None, seed=None
+                               add_topic, use_title, shuffle, bsz
                                ):
     data_set = RetrievalSet(samples, entities, labels,
                             max_len, tokenizer, candidates,
                             num_cands, rands_ratio, type_loss, add_topic,
                             use_title)
-    loader = make_single_loader(data_set, bsz, shuffle, is_distributed,
-                                world_size, rank, seed)
+    loader = make_single_loader(data_set, bsz, shuffle)
     return loader
 
 
 def get_loaders(samples_train, samples_val, samples_test, entities, max_len,
                 tokenizer, mention_bsz, entity_bsz, add_topic,
-                use_title, is_distributed, world_size=None, rank=None,
-                seed=None):
-    # TODO: get all mention and entity dataloaders
+                use_title):
+    #  get all mention and entity dataloaders
     train_mention_set = MentionSet(samples_train, max_len, tokenizer,
                                    add_topic, use_title)
     val_mention_set = MentionSet(samples_val, max_len, tokenizer, add_topic,
@@ -314,15 +264,11 @@ def get_loaders(samples_train, samples_val, samples_test, entities, max_len,
     test_mention_set = MentionSet(samples_test, max_len, tokenizer, add_topic,
                                   use_title)
     entity_set = EntitySet(entities)
-    entity_loader = make_single_loader(entity_set, entity_bsz, False,
-                                       is_distributed, world_size, rank, seed)
+    entity_loader = make_single_loader(entity_set, entity_bsz, False)
     train_men_loader = make_single_loader(train_mention_set, mention_bsz,
-                                          False, is_distributed, world_size,
-                                          rank, seed)
-    val_men_loader = make_single_loader(val_mention_set, mention_bsz, False,
-                                        is_distributed, world_size, rank, seed)
-    test_men_loader = make_single_loader(test_mention_set, mention_bsz, False,
-                                         is_distributed, world_size, rank, seed)
+                                          False)
+    val_men_loader = make_single_loader(val_mention_set, mention_bsz, False)
+    test_men_loader = make_single_loader(test_mention_set, mention_bsz, False)
 
     return train_men_loader, val_men_loader, test_men_loader, entity_loader
 
@@ -331,7 +277,6 @@ def save_candidates(mentions, candidates, entity_map, labels, out_dir, part):
     # save results for reader training
     assert len(mentions) == len(candidates)
     labels = labels.tolist()
-    # candidates_doc = get_group_outputs(mentions, candidates)
     out_path = os.path.join(out_dir, '%s.json' % part)
     entity_titles = np.array(list(entity_map.keys()))
     fout = open(out_path, 'w')
@@ -348,7 +293,8 @@ def save_candidates(mentions, candidates, entity_map, labels, out_dir, part):
             negatives = [c for c in m_candidates if c not in labels[i]]
             pos_titles = entity_titles[positives].tolist()
             pos_spans = [ent_span_dict[p] for p in pos_titles]
-            gold_titles = entity_titles[labels[i]].tolist()
+            gold_ids = list(set(labels[i]))
+            gold_titles = entity_titles[gold_ids].tolist()
             gold_spans = [ent_span_dict[g] for g in gold_titles]
             neg_spans = [[[0, 0]]] * len(negatives)
             item = {'doc_id': mention['doc_id'],
@@ -358,7 +304,7 @@ def save_candidates(mentions, candidates, entity_map, labels, out_dir, part):
                     'negatives': negatives,
                     'labels': mention['entities'],
                     'label_spans': m_spans,
-                    'gold_ids': labels[i],
+                    'gold_ids': gold_ids,
                     'gold_spans': gold_spans,
                     'pos_spans': pos_spans,
                     'neg_spans': neg_spans,
@@ -370,7 +316,6 @@ def save_candidates(mentions, candidates, entity_map, labels, out_dir, part):
                     }
         else:
             candidate_titles = entity_titles[m_candidates]
-            # print(candidate_titles)
             candidate_spans = [ent_span_dict[s] if s in ent_span_dict else
                                [[0, 0]] for s in candidate_titles]
             passage_labels = [1 if c in mention['entities'] else 0 for c in

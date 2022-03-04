@@ -76,7 +76,8 @@ def sum_log_loss(logits, mask, reduction='sum'):
     gold_scores = logits.masked_fill(~(mask.bool()), 0)
     gold_scores_sum = gold_scores.sum(-1)  # BxC
     all_log_sum_exp = torch.logsumexp(logits, -1)  # B x C
-    gold_log_probs = gold_scores_sum - all_log_sum_exp * num_pos
+    # gold_log_probs = gold_scores_sum - all_log_sum_exp * num_pos
+    gold_log_probs = gold_scores_sum/num_pos - all_log_sum_exp
     loss = -gold_log_probs.sum()
     if reduction == 'mean':
         loss /= logits.size(0)

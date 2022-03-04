@@ -14,25 +14,20 @@ class ReaderData(Dataset):
                  samples,
                  entities,
                  max_len,
-                 max_passage_len,
                  max_num_candidates,
                  is_training,
                  add_topic=False,
                  use_title=False):
         self.tokenizer = tokenizer
+        self.is_training = is_training
         self.samples = samples
         self.entities = entities
         self.all_entity_token_ids = np.array([e['text_ids'] for e in entities])
         self.all_entity_masks = np.array([e['text_masks'] for e in entities])
-        # self.entities = entities  # {'title':{'text_ids','text_masks'}}
         self.max_len = max_len
-        self.max_passage_len = max_passage_len
         self.max_num_candidates = max_num_candidates
-        self.is_training = is_training
         self.add_topic = add_topic
         self.use_title = use_title
-        # self.TT = '[unused1]'
-        # '[unused1]' encode
         self.TT = [2]
 
     def __len__(self):
@@ -75,13 +70,13 @@ class ReaderData(Dataset):
         attention_masks = torch.zeros((self.max_num_candidates,
                                        self.max_len)).long()
         answer_masks = torch.zeros((self.max_num_candidates,
-                                    self.max_passage_len)).long()
+                                    self.max_len)).long()
         passage_labels = torch.tensor(passage_labels).long()
         if self.is_training:
             start_labels = torch.zeros((self.max_num_candidates,
-                                        self.max_passage_len)).long()
+                                        self.max_len)).long()
             end_labels = torch.zeros((self.max_num_candidates,
-                                      self.max_passage_len)).long()
+                                      self.max_len)).long()
         for i, candidate_ids in enumerate(candidates_ids):
             if self.is_training:
                 _spans = np.array(spans[i])
@@ -91,8 +86,8 @@ class ReaderData(Dataset):
             candidate_ids = candidate_ids.tolist()
             candidate_masks = candidates_masks[i].tolist()
             # CLS mention ids TT title ids SEP candidate ids SEP
-            input_ids = mention_ids[:-1] + title_ids + [mention_ids[-1]] + \
-                        candidate_ids[1:]
+            input_ids = mention_ids[:-1] + title_ids + [
+                self.tokenizer.sep_token_id] + candidate_ids[1:]
             input_ids = (input_ids + [self.tokenizer.pad_token_id] * (
                     self.max_len - len(input_ids)))[:self.max_len]
             attention_mask = [1] * (len(mention_ids + title_ids)) + \
@@ -106,14 +101,13 @@ class ReaderData(Dataset):
             encoded_pairs[i] = torch.tensor(input_ids)
             attention_masks[i] = torch.tensor(attention_mask)
             type_marks[i] = torch.tensor(token_type_ids)
-            # exclude SEP position for mention ids
-            answer_masks[i, :len(mention_ids) - 1] = 1
+            answer_masks[i, :len(mention_ids)] = 1
         if self.is_training:
             return encoded_pairs, attention_masks, type_marks, answer_masks, \
                    passage_labels, start_labels, end_labels
         else:
             return encoded_pairs, attention_masks, type_marks, answer_masks, \
-                   passage_labels, torch.tensor([index]).long()
+                   passage_labels
 
 
 def load_data(data_dir, kb_dir):
@@ -122,7 +116,8 @@ def load_data(data_dir, kb_dir):
         items = []
         with open(os.path.join(data_dir, name)) as f:
             for line in f:
-                items.append(json.loads(line))
+                item = json.loads(line)
+                items.append(item)
         return items
 
     samples_train = read_data('train')
@@ -165,32 +160,23 @@ def get_golds(samples_train, samples_dev, samples_test):
 
 
 def get_loaders(tokenizer, data, max_len,
-                max_passage_len,
                 max_num_candidates,
                 max_num_candidates_val,
                 train_bsz, val_bsz,
-                add_topic, use_title, is_distributed,
-                world_size=None,
-                rank=None, seed=None):
+                add_topic, use_title):
     samples_train, samples_dev, samples_test, entities = data
     train_set = ReaderData(tokenizer, samples_train, entities, max_len,
-                           max_passage_len,
                            max_num_candidates, True,
                            add_topic, use_title)
     dev_set = ReaderData(tokenizer, samples_dev, entities, max_len,
-                         max_passage_len,
                          max_num_candidates_val, False, add_topic,
                          use_title)
     test_set = ReaderData(tokenizer, samples_test, entities, max_len,
-                          max_passage_len,
                           max_num_candidates_val, False, add_topic,
                           use_title)
-    loader_train = make_single_loader(train_set, train_bsz, True,
-                                      is_distributed, world_size, rank, seed)
-    loader_dev = make_single_loader(dev_set, val_bsz, False, is_distributed,
-                                    world_size, rank, seed)
-    loader_test = make_single_loader(test_set, val_bsz, False, is_distributed,
-                                     world_size, rank, seed)
+    loader_train = make_single_loader(train_set, train_bsz, True)
+    loader_dev = make_single_loader(dev_set, val_bsz, False)
+    loader_test = make_single_loader(test_set, val_bsz, False)
     return loader_train, loader_dev, loader_test
 
 
@@ -206,7 +192,6 @@ def get_results_doc(passage_results, samples):
         for r in p:
             result = (sample['doc_id'], r[0] + offset, r[1] + offset, r[2])
             results.append(result)
-            # if result not in results:
     # result: doc_id, start_doc,end_doc,entity_name
     results = list(OrderedSet(results))
     return results
