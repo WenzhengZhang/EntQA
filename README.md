@@ -73,7 +73,8 @@ python run_reader.py  \
 ```
 ### Reader Local Evaluation
 1. You can follow the above instructions to train your reader or you can download our trained reader [here](https://drive.google.com/file/d/1A4I1fJZKxmROIE1fd0mdXN6b1emP_xt4/view?usp=sharing)
-2. Use the above reader training scripts and set `--epochs` to be 0 for evaluation.
+2. You can run retriever local evaluation for your trained retriever or our trained retriever to get reader input data. Or you can download our reader input data [here](https://drive.google.com/drive/folders/1xfEgXCREe6pbSmAsnidsMuVYMK_mlOao?usp=sharing)
+3. Use the above reader training scripts and set `--epochs` to be 0 for evaluation.
 
 ### Reader Results
 
