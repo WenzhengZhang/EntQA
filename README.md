@@ -71,6 +71,7 @@ python run_reader.py  \
 --do_rerank  --add_topic  --results_dir /reader_results/  --kb_dir /kb/
 
 ```
+It takes about 6 hours on 2 A100 GPUs to finish the reader training experiment. It takes up 36G GPU memory for the main GPU and 32G GPU memory for the other GPU.
 ### Reader Local Evaluation
 1. You can follow the above instructions to train your reader or you can download our trained reader [here](https://drive.google.com/file/d/1A4I1fJZKxmROIE1fd0mdXN6b1emP_xt4/view?usp=sharing)
 2. You can run retriever local evaluation for your trained retriever or our trained retriever to get reader input data. Or you can download our reader input data [here](https://drive.google.com/drive/folders/1xfEgXCREe6pbSmAsnidsMuVYMK_mlOao?usp=sharing)
