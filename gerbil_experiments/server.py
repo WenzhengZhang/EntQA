@@ -144,17 +144,8 @@ if __name__ == "__main__":
                         help='do reranking for reader?')
     parser.add_argument('--use_title', action='store_true',
                         help='use title?')
-    parser.add_argument('--trained_dp', action='store_true',
-                        help='model trained in dp?')
     parser.add_argument('--no_multi_ents', action='store_true',
                         help='no repeated entities are allowed given a span?')
-    parser.add_argument('--title_attention', action='store_true',
-                        help='use title attention instead of doc attention?')
-    parser.add_argument('--use_doc', action='store_true',
-                        help='use doc for global info?')
-    parser.add_argument('--max_doc_len', type=int, default=20,
-                        help='max length of doc for global attention [%('
-                             'default)d]')
 
     args = parser.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus

@@ -55,7 +55,8 @@ class Annotator(object):
                                         self.args.type_span_loss,
                                         self.args.do_rerank,
                                         self.args.type_rank_loss,
-                                        self.args.max_answer_len)
+                                        self.args.max_answer_len,
+                                        self.args.max_passage_len)
         self.model_reader.to(self.my_device)
         if self.dp:
             self.logger.log('Data parallel across %d GPUs: %s' %
@@ -86,20 +87,17 @@ class Annotator(object):
                                                 self.args.max_len_retriever,
                                                 self.args.add_topic,
                                                 self.args.use_title)
-        # all_cands_embeds = np.load(args.cands_embeds_path)
         test_mention_embeds = get_embeddings(retriever_loader,
                                              self.model_retriever, True,
-                                             self.my_device, False)
+                                             self.my_device)
         top_k_test, scores_k_test = get_hard_negative(test_mention_embeds,
                                                       self.all_cands_embeds,
                                                       self.args.k, 0, False)
         self.logger.log('reader part')
-        # entities = load_entities(args.ents_path)
         samples_reader = get_reader_input(samples_retriever, top_k_test,
                                           self.entities)
         reader_loader = get_reader_loader(samples_reader, self.tokenizer,
                                           self.args.max_len_reader,
-                                          self.args.max_passage_len,
                                           self.args.max_num_candidates,
                                           self.args.bsz_reader,
                                           self.args.add_topic,

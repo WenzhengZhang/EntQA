@@ -3,6 +3,7 @@ import json
 from torch.utils.data import DataLoader, Dataset
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),
                                                 '../')))
 from data_retriever import MentionSet
@@ -11,15 +12,12 @@ import math
 
 
 def process_raw_data(document, tokenizer, length, stride):
-    # TODO: return tokenized passages of the document
     topic = document.split(' ', 1)[0].replace(',', '').replace("'s", '')
     title_1 = document.split('.', 1)[0]
     title_2 = document.split('\n', 1)[0]
     title = title_1 if len(title_1) < len(title_2) else title_2
     title = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(title))
-    # topic = document.split('\n', 1)[0]
     topic = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(topic))
-    # document = ''.join(document.split('\n'))
     text = tokenizer.tokenize(document)
     token2char_start, token2char_end = token_to_char_map(document,
                                                          text)
@@ -27,18 +25,22 @@ def process_raw_data(document, tokenizer, length, stride):
     content_length = length - 2
     samples = []
     data_num = 0
-    for ins_num in range(math.ceil(len(text_ids) / stride)):
-        begin = ins_num * stride
-        end = ins_num * stride + content_length
-        instance_ids = [101] + text_ids[begin:end] + [102]
-        # +1 for [BOS]
-        samples.append(
-            {
-                "text": instance_ids,
-                "topic": topic,
-                'title': title
-            }
-        )
+    if len(text_ids) < content_length:
+        instance_ids = [101] + text_ids + [102]
+        samples.append({'text': instance_ids, 'topic': topic, 'title': title})
+    else:
+        for ins_num in range(math.ceil(len(text_ids) / stride)):
+            begin = ins_num * stride
+            end = ins_num * stride + content_length
+            instance_ids = [101] + text_ids[begin:end] + [102]
+            # +1 for [BOS]
+            samples.append(
+                {
+                    "text": instance_ids,
+                    "topic": topic,
+                    'title': title
+                }
+            )
 
     data_num += 1
 
@@ -48,7 +50,6 @@ def process_raw_data(document, tokenizer, length, stride):
 
 
 def load_entities(ents_path):
-    # TODO: get np array of entity titles, get entities
     entities = []
     with open(ents_path) as f:
         for line in f:
@@ -59,7 +60,7 @@ def load_entities(ents_path):
 
 def get_retriever_loader(samples, tokenizer, bsz, max_len, add_topic=False,
                          use_title=False):
-    # TODO: get retriever dataloader, call process_raw_data
+    # get retriever dataloader
     retriever_set = MentionSet(samples, max_len, tokenizer, add_topic,
                                use_title)
     retriever_loader = DataLoader(retriever_set, bsz, shuffle=False)
@@ -67,7 +68,7 @@ def get_retriever_loader(samples, tokenizer, bsz, max_len, add_topic=False,
 
 
 def get_reader_input(samples, candidates, ents):
-    # TODO: convert faiss top-k candidates to reader input list of dicts
+    # convert faiss top-k candidates to reader input list of dicts
     # ents is list of entity dicts
     assert len(samples) == len(candidates)
     results = []
@@ -81,11 +82,10 @@ def get_reader_input(samples, candidates, ents):
 
 
 def get_reader_loader(samples, tokenizer, max_len,
-                      max_passage_len,
                       max_num_candidates, bsz,
                       add_topic, use_title):
-    # TODO: call get_reader_input then get the reader loader
-    reader_set = ReaderTestData(tokenizer, samples, max_len, max_passage_len,
+    #   get the reader loader
+    reader_set = ReaderTestData(tokenizer, samples, max_len,
                                 max_num_candidates, add_topic, use_title)
     reader_loader = DataLoader(reader_set, bsz, shuffle=False)
     return reader_loader
@@ -156,10 +156,7 @@ def token_to_char_map(document, doc_tokens):
         cum_len += len(token)
         token2char_end[i] = cum_len - 1
         len_token = 1 if token == '[UNK]' else len(token)
-        for _ in range(len_token):  # bug needs to be fixed, key error
-            # occurs frequently because of unk token
-            # if char_space_dict[char_index] == 1:
-            #     cum_len += 1
+        for _ in range(len_token):
             cum_len += char_space_dict[char_index]
             char_index += 1
     return token2char_start, token2char_end
@@ -169,7 +166,7 @@ def token_span_to_gerbil_span(predicts, token2char_start, token2char_end):
     results = [(token2char_start[p[0]],
                 token2char_end[p[1]] - token2char_start[p[0]] + 1,
                 p[2]) for p in predicts]
-    # bug needs to be fixed, met -1 key
+
     return results
 
 
@@ -194,14 +191,11 @@ def compute_white_after_char(data):
 class ReaderTestData(Dataset):
     # get the input data item for the reader model
     def __init__(self, tokenizer, samples, max_len,
-                 max_passage_len,
                  max_num_candidates,
                  add_topic=True, use_title=False):
         self.tokenizer = tokenizer
         self.samples = samples
-        # self.entities = entities  # {'title':{'text_ids','text_masks'}}
         self.max_len = max_len
-        self.max_passage_len = max_passage_len
         self.max_num_candidates = max_num_candidates
         self.add_topic = add_topic
         self.use_title = use_title
@@ -221,22 +215,14 @@ class ReaderTestData(Dataset):
             title = sample['topic'] if not self.use_title else sample['title']
         encoded_pairs, attention_masks, \
         type_marks, answer_masks = self.prepare_inputs(sample, title)
-        # print(encoded_pairs)
-
-        # return encoded_pairs, attention_masks, type_marks, answer_masks, \
-        #        passage_labels, start_marks, end_marks
         return encoded_pairs, attention_masks, type_marks, answer_masks
 
     def prepare_inputs(self, sample, title=None):
         mention_ids = sample['text']
         if self.add_topic:
-            # title_tokens = [self.TT] + self.tokenizer.tokenize(title)
-            # title_ids = self.tokenizer.convert_tokens_to_ids(title_tokens)
             title_ids = self.TT + title
         else:
             title_ids = []
-        # passage_labels = torch.tensor(sample['passage_labels'][
-        #                               :self.max_num_candidates]).long()
         candidates = sample['candidates'][:self.max_num_candidates]
         encoded_pairs = torch.zeros((self.max_num_candidates,
                                      self.max_len)).long()
@@ -244,14 +230,13 @@ class ReaderTestData(Dataset):
         attention_masks = torch.zeros((self.max_num_candidates,
                                        self.max_len)).long()
         answer_masks = torch.zeros((self.max_num_candidates,
-                                    self.max_passage_len)).long()
+                                    self.max_len)).long()
         for i, candidate in enumerate(candidates):
             candidate_ids = candidate['text_ids']
             candidate_masks = candidate['text_masks']
-            # input_ids = mention_ids + title_ids + candidate_ids[1:]
-            input_ids = mention_ids[:-1] + title_ids + [mention_ids[-1]] + \
-                        candidate_ids[1:]
-            # input_ids = mention_ids + title_ids + candidate_ids[1:]
+            # CLS + mention_ids + title_ids + SEP + candidate_ids
+            input_ids = mention_ids[:-1] + title_ids + [
+                self.tokenizer.sep_token_id] + candidate_ids[1:]
             input_ids = (input_ids + [self.tokenizer.pad_token_id] * (
                     self.max_len - len(input_ids)))[:self.max_len]
             attention_mask = [1] * (len(mention_ids + title_ids)) + \
@@ -265,5 +250,5 @@ class ReaderTestData(Dataset):
             encoded_pairs[i] = torch.tensor(input_ids)
             attention_masks[i] = torch.tensor(attention_mask)
             type_marks[i] = torch.tensor(token_type_ids)
-            answer_masks[i, :len(mention_ids)-1] = 1
+            answer_masks[i, :len(mention_ids)] = 1
         return encoded_pairs, attention_masks, type_marks, answer_masks
