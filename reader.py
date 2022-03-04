@@ -68,7 +68,6 @@ class Reader(nn.Module):
                 end_labels=None):
         # batchsize, number of candidates per question, length
         B, C, L = input_ids.size()
-        # max_passage_len = answer_mask.size(-1)
         input_ids = input_ids.view(-1, L)
         attention_mask = attention_mask.view(-1, L)
         token_type_ids = token_type_ids.view(-1, L)
@@ -77,13 +76,9 @@ class Reader(nn.Module):
                                     attention_mask=attention_mask,
                                     token_type_ids=token_type_ids)[0]
         span_logits = self.qa_outputs(last_hiddens)
-        # span_logits = self.qa_outputs(last_hiddens[:, :max_passage_len])
         start_logits, end_logits = span_logits.split(1, dim=-1)
-        # BC x max_passage_len
         start_logits = start_logits.squeeze(-1).view(B, C, L)
         end_logits = end_logits.squeeze(-1).view(B, C, L)
-        # start_logits = start_logits.squeeze(-1).view(B, C, max_passage_len)
-        # end_logits = end_logits.squeeze(-1).view(B, C, max_passage_len)
         rank_logits = None
         if self.do_rerank:
             rank_logits = self.qa_classifier(last_hiddens[:, 0, :]).view(B, C)

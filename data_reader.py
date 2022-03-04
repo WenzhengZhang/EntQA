@@ -80,7 +80,6 @@ class ReaderData(Dataset):
         for i, candidate_ids in enumerate(candidates_ids):
             if self.is_training:
                 _spans = np.array(spans[i])
-                # print(_spans)
                 start_labels[i, _spans[:, 0]] = 1
                 end_labels[i, _spans[:, 1]] = 1
             candidate_ids = candidate_ids.tolist()

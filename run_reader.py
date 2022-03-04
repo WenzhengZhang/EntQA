@@ -181,7 +181,6 @@ def main(args):
         best_val_perf = cpt['perf']
     model.to(device)
     loader_train, loader_dev, loader_test = get_loaders(tokenizer, data, args.L,
-                                                        # args.max_passage_len,
                                                         args.C, args.C_val,
                                                         args.B, args.val_bsz,
                                                         args.add_topic,
@@ -313,7 +312,6 @@ def main(args):
                    ''.format(len(args.gpus.split(',')), args.gpus))
         model = nn.DataParallel(model)
     model.eval()
-    # print([d['candidates'][:3] for d in data[2]])
     logger.log('getting test raw predicts')
     start_time_test_infer = datetime.now()
     test_raw_predicts, test_rank_scores, test_rank_labels = get_raw_results(
@@ -422,17 +420,8 @@ if __name__ == '__main__':
                         help='probabilty threshold for top-p filtering')
     parser.add_argument('--num_answers', type=int, default=10,
                         help='max number of answers [%(default)d]')
-    parser.add_argument('--use_gold', action='store_true',
-                        help='use gold info to filter positives for training?')
     parser.add_argument('--use_title', action='store_true',
                         help='use title or use topic?')
-    parser.add_argument('--use_doc', action='store_true',
-                        help='use document information?')
-    parser.add_argument('--manual_thresd', action='store_true',
-                        help='manual thresholding ?')
-    parser.add_argument('--include_gold', action='store_true',
-                        help='manually include gold for training if no '
-                             'positives in retrieved passages?')
     parser.add_argument('--random_positive', action='store_true',
                         help='random positive?')
     parser.add_argument('--oracle', action='store_true',
