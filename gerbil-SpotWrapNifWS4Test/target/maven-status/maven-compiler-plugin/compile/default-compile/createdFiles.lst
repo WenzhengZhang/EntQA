@@ -1,0 +1,6 @@
+org/aksw/gerbil/ws4test/SpotlightResource.class
+org/aksw/gerbil/ws4test/EDResource.class
+org/aksw/gerbil/ws4test/MyResource.class
+org/aksw/gerbil/ws4test/TestApplication.class
+org/aksw/gerbil/ws4test/SpotlightClient.class
+org/aksw/gerbil/ws4test/LocalIntermediateWebserver.class
