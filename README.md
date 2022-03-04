@@ -109,6 +109,8 @@ python gerbil_experiments/server.py  \
 ```
 Open the url http://localhost:1234/gerbil
 - Configure experiment
+- Select A2KB as experiment type
+- Select strong evaluation as Matching
 - In URI field write: http://localhost:1235/gerbil-spotWrapNifWS4Test/myalgorithm
 - Name: whatever you wish
 - Press add annotator button
