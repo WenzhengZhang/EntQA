@@ -1,5 +1,5 @@
 scikit-learn
 numpy
 spacy
-torch=1.7.1
+torch==1.7.1
 transformers>=4.0
