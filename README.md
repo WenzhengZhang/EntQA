@@ -7,7 +7,7 @@ This repo provides the code for our ICLR 2022 paper [EntQA: Entitly Linking as Q
 ```
 conda create --name entqa python=3.8
 conda activate entqa
-pip -r install requirements.txt
+pip install -r requirements.txt
 conda install -c pytorch faiss-gpu cudatoolkit=11.0
 
 ```
@@ -21,7 +21,7 @@ conda install -c pytorch faiss-gpu cudatoolkit=11.0
 ```
 python preprocess_data.py \
 --raw_dir /raw_aida/  --out_aida_dir /retriever_input/  \
---raw_kb_dir /raw_kb/ --out_kb_path /kb/entities_kilt.json \
+--raw_kb_path /raw_kb/[kilt wikipedia file name] --out_kb_path /kb/entities_kilt.json \
 --max_ent_len 128  --instance_length 32 --stride 16 --pos_prop 1 --title_map_dir /raw_aida/
 
 ```
