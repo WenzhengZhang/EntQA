@@ -13,6 +13,8 @@ conda install -c pytorch faiss-gpu cudatoolkit=11.0
 ```
 
 ## Download data & preprocess
+All the preprocessed data can be downloaded [here](https://drive.google.com/drive/folders/1DQvfjKOuOoUE3YcYrg2GIvODaOEZXMdH?usp=sharing), you can skip following preprocess steps. 
+Or preprocess by yourself: 
 1. Download KILT wikipedia knowledge base [here](https://github.com/facebookresearch/KILT) and put it under a kb directory like /raw_kb/  \
 2. Download BLINK pretrained retriever model [here](https://github.com/facebookresearch/BLINK)  \
 3. Download AIDA CoNLL datasets [here](https://www.mpi-inf.mpg.de/departments/databases-and-information-systems/research/ambiverse-nlu/aida/downloads) and place them under a raw aida directory like /raw_aida/ \
